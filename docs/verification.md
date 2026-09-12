@@ -261,3 +261,19 @@ pwsh 真机执行、grep 超限时的真实会话 e2e、`/rtk` 命令面与 sett
 **为什么用显式开关而不是"用户是否设过 truncate"**：loader 传给 `apply` 的是 **schema 归一化后**的配置，每个字段都带默认值，"键不存在"与"显式设为默认值"无法区分。第一版据此判断，被测试当场抓出（协调永不生效）。显式开关语义清晰且可覆盖。
 
 **未覆盖**：spill 真实触发路径未在会话内观察到（需要一次 >50000 字节且不被 rtk 改写的输出）；本项结论基于配置 + 截断行为的实测。
+
+---
+
+## 10. settings 命名空间静默失败（已修）
+
+**症状**：`/rtk show` 打印 `config: settings service unavailable`；`settings.describe()` 里始终没有 `dsh-rtk`；所有 settings 编辑无效且**毫无提示**。
+
+**根因**：同一份 `apply()` 里出现矛盾 —— `ctx.get('spillStore')` 成功（`truncate off` 证明协调生效），而 `ctx.get('settings')` 返回 `undefined`。服务不是不存在，而是**注册得晚**：settings provider 要先读设置文档。`inject` 当时只声明了 `tools`，插件在 settings 出现之前就已经 apply 过了。
+
+**修复**：`inject = ['tools', 'settings']`。Cordis 对这个声明的语义正是「等待服务出现后再激活」。
+
+**验证**（重启后）：`hasDshRtk=true`，namespace 总数 17 → 18，解析值 `readCompaction.enabled=true`、`smartTruncate={enabled:true,maxLines:220}`、`deferToHarnessSpill=true`，均与 patch 配置一致。
+
+**一个容易误读的点**：settings 里 `truncate.enabled` 显示 `true`（schema 解析值），而实际行为是**关闭**的 —— 因为插件在运行时探测到 spill 后做了协调。`deferToHarnessSpill` 才是表达该意图的字段。
+
+**注**：这个 bug 之所以能被找到，靠的是先前那次「让失败可见」的改动 —— 在此之前它是完全静默的。
