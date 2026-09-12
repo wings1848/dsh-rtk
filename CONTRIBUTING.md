@@ -107,6 +107,13 @@ npm trust github @wingsbutterfly/dsh-rtk \
 notice rather than a red X — which matters, because a failing badge teaches people
 to ignore badges.
 
+It reaches that by **attempting the publish and reading the refusal**, not by asking
+`npm view` first. The registry's read endpoint is served from a cache that lags a
+fresh publish by minutes, so a `npm view` guard answers "not published yet" for a
+version that is already there, and the publish that follows is refused with a 403
+that reads like an auth problem. That is exactly how the first tagged release went
+red with a fully green test run above it.
+
 ### Subsequent releases
 
 Bump the version in `package.json` and `CHANGELOG.md`, commit, then tag:
