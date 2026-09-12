@@ -185,7 +185,18 @@ $ rtk rewrite "ls -la /tmp | head -5"  → exit 1   （无输出）
 
 **rtk 对含管道的命令保守跳过改写**——这是 rtk 自身的支持策略，插件忠实转发。排查期间一度误判为缺陷，实为测试命令自带了 `| head`，绕过了改写。用户若想让某条命令走 rtk，去掉管道（或用 `rtk …` 显式调用）。
 
-### 6.5 另一条被 harness 拒绝的路径（留档）
+### 6.5 `/rtk` 命令在真实环境已注册
+
+交付的能力里，命令改写与输出压缩已直接观察到；`/rtk` 是最后一项未在真实会话中确认的。用动态插件读取宿主的命令注册表（一次 bash 调用触发）：
+
+```
+[rtk-cmd] rtkCommand=FOUND (RTK command rewriting and output compaction: sta)
+          | all=[compact,export,feedback,goal,permission,plan,rtk]
+```
+
+`rtk` 出现在该 agent 可见的命令列表中。用户可自行输入 `/rtk`、`/rtk verify`、`/rtk stats` 复核。
+
+### 6.6 另一条被 harness 拒绝的路径（留档）
 
 曾尝试把**正在运行的会话**重挂到 preset 以取得进程内证据，`agentPresets.select` 明确拒绝：
 
