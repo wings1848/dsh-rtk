@@ -1,0 +1,69 @@
+{
+  "name": "dsh-rtk",
+  "version": "0.1.0",
+  "description": "RTK command rewriting and tool-output compaction for the DeepSeek Harness: rewrites bash commands to their rtk equivalents and compacts noisy tool output before it reaches the model.",
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "src",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "license": "MIT",
+  "author": "wings1848",
+  "homepage": "https://github.com/wings1848/dsh-rtk#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wings1848/dsh-rtk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/wings1848/dsh-rtk/issues"
+  },
+  "keywords": [
+    "deepseek",
+    "harness",
+    "dsh",
+    "dsh-plugin",
+    "rtk",
+    "token-optimization",
+    "output-compaction",
+    "command-rewrite"
+  ],
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "packageManager": "pnpm@12.3.4",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test test/*.test.ts",
+    "check": "node --run typecheck && node --run test && node --run build",
+    "prepack": "node --run build"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.0"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  }
+}
