@@ -66,7 +66,11 @@ export const DEFAULT_CONFIG: RtkConfig = {
   enabled: true,
   mode: 'rewrite',
   guardWhenRtkMissing: true,
-  showRewriteNotifications: true,
+  // Deliberately off, unlike pi-rtk-optimizer's equivalent flag. There the
+  // notice is a TUI toast; here it is appended to the tool result, so it would
+  // sit in the model's context on every rewritten call. The saving is the
+  // point of the plugin, and `/rtk stats` already reports what happened.
+  showRewriteNotifications: false,
   rtkExecutable: 'rtk',
   rewriteTimeoutMs: 3000,
   compactedTools: ['bash', 'read', 'grep'],

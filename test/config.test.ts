@@ -14,6 +14,10 @@ describe('normalizeConfig', () => {
     assert.equal(config.outputCompaction.stripAnsi, true)
     assert.equal(config.outputCompaction.truncate.enabled, true)
     assert.equal(config.outputCompaction.truncate.maxChars, 12000)
+
+    // Documented in both READMEs; the notice would otherwise sit in the
+    // model's context on every rewritten call.
+    assert.equal(config.showRewriteNotifications, false)
   })
 
   it('keeps lossy read compaction off by default', () => {
