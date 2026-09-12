@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { describe, it } from 'node:test'
 
 import { apply } from '../lib/index.js'
@@ -62,6 +63,20 @@ function fakeContext(services: Record<string, unknown> = {}): {
   }
 }
 
+/**
+ * Why the rewriting cases below are skipped when rtk is missing, or `false`.
+ *
+ * Those cases drive the real `rtk` binary: the rewrite decision *is* the
+ * feature, and a stub would only prove the stub works. A contributor without
+ * rtk should still be able to run the rest of the suite and see it pass, so the
+ * dependency is reported as a skip with an actionable reason rather than as a
+ * failure. CI installs rtk, so they always run there.
+ */
+const rtkSkip =
+  spawnSync('rtk', ['--version'], { stdio: 'ignore' }).status === 0
+    ? false
+    : 'rtk is not installed — see README.md for the install options'
+
 const REWRITE_CONFIG = normalizeConfig({})
 
 /** The `tools/execute` invocation shape the plugin consumes. */
@@ -77,7 +92,7 @@ describe('apply() wiring', () => {
     assert.ok(harness.listeners.has('tools/post-execute'), 'expected a tools/post-execute listener')
   })
 
-  it('rewrites a supported command and restores the original afterwards', async () => {
+  it('rewrites a supported command and restores the original afterwards', { skip: rtkSkip }, async () => {
     const harness = fakeContext()
     apply(harness.ctx, REWRITE_CONFIG as never)
 
@@ -133,7 +148,7 @@ describe('apply() wiring', () => {
     assert.deepEqual(seenByBody, { path: 'a.ts' })
   })
 
-  it('does not rewrite in suggest mode', async () => {
+  it('does not rewrite in suggest mode', { skip: rtkSkip }, async () => {
     const harness = fakeContext()
     apply(harness.ctx, normalizeConfig({ mode: 'suggest' }) as never)
 

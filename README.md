@@ -1,5 +1,12 @@
 # dsh-rtk
 
+[![CI](https://github.com/wings1848/dsh-rtk/actions/workflows/ci.yml/badge.svg)](https://github.com/wings1848/dsh-rtk/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/wings1848/dsh-rtk/actions/workflows/codeql.yml/badge.svg)](https://github.com/wings1848/dsh-rtk/actions/workflows/codeql.yml)
+[![Secrets](https://github.com/wings1848/dsh-rtk/actions/workflows/secrets.yml/badge.svg)](https://github.com/wings1848/dsh-rtk/actions/workflows/secrets.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/wings1848/dsh-rtk/blob/main/LICENSE)
+[![Node](https://img.shields.io/badge/node-%3E%3D22.18.0-brightgreen.svg)](https://nodejs.org)
+[![中文文档](https://img.shields.io/badge/README-%E4%B8%AD%E6%96%87-blue)](https://github.com/wings1848/dsh-rtk/blob/main/README.zh.md)
+
 RTK command rewriting and tool-output compaction for the [DeepSeek Harness](https://github.com/deepseek-ai/dsh).
 
 `dsh-rtk` rewrites `bash` commands to their [rtk](https://github.com/rtk-ai/rtk) equivalents before they run, and compacts noisy tool output before it reaches the model. It is a port of [`pi-rtk-optimizer`](https://github.com/MasuRii/pi-rtk-optimizer) to the harness's plugin model.
@@ -11,6 +18,8 @@ model sees:  Branch: main
              Modified: 2 files
                src/a.ts
 ```
+
+![How dsh-rtk works](https://raw.githubusercontent.com/wings1848/dsh-rtk/main/docs/assets/how-it-works.svg)
 
 ## Features
 
@@ -188,6 +197,8 @@ pnpm run check        # typecheck + test
 ```
 
 The tests import `lib/`, so `pnpm test` builds before it runs; a `src/` edit that is never built would otherwise pass the suite unnoticed.
+
+The port's acceptance evidence, including the eight defects later reviews and live testing surfaced, is in [https://github.com/wings1848/dsh-rtk/blob/main/docs/verification.md](https://github.com/wings1848/dsh-rtk/blob/main/docs/verification.md).
 
 `test/integration.test.ts` drives the real `apply()` through a stand-in context and calls the real `rtk` binary, so it fails on a machine without rtk installed — that is intentional: the rewrite path is the feature.
 

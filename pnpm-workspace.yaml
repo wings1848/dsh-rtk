@@ -1,0 +1,15 @@
+# pnpm 12 applies a 24-hour minimum release age by default. That default is
+# **non-strict**: a too-fresh dependency is recorded here automatically and the
+# install still succeeds. Listing the scope explicitly keeps that exception
+# visible in the diff and stable across machines instead of letting pnpm
+# rewrite this file silently.
+#
+# Strict mode (ERR_PNPM_NO_MATURE_MATCHING_VERSION) only triggers when
+# `minimumReleaseAge` is set explicitly, which this file does not do.
+#
+# The @deepseek-ai/* packages are the harness this plugin integrates with. It
+# ships as a fast-moving prerelease, and the versions developed against are
+# typically hours old. The scope is the whole extent of the exception;
+# everything else in the tree stays subject to the age check.
+minimumReleaseAgeExclude:
+  - '@deepseek-ai/*'

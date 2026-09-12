@@ -1,0 +1,33 @@
+version: 2
+
+updates:
+  # The @deepseek-ai/* packages are the harness this plugin integrates with, and
+  # it ships as a fast-moving prerelease. Bumping them is a deliberate act:
+  # change the peer range and re-run the suite against the running harness,
+  # which is exactly what a bot cannot do. Everything else is fair game.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: 'build'
+      include: scope
+    ignore:
+      - dependency-name: '@deepseek-ai/*'
+    groups:
+      dev-dependencies:
+        dependency-type: development
+        update-types: [minor, patch]
+
+  # Keep the workflow actions current. They are pinned to major tags, so this is
+  # how those majors get bumped.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: 'ci'
+      include: scope

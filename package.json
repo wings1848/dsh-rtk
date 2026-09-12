@@ -16,9 +16,11 @@
     "lib",
     "src",
     "docs",
+    "scripts/link-dsh.mjs",
     "README.md",
     "README.zh.md",
     "CHANGELOG.md",
+    "THIRD_PARTY_NOTICES.md",
     "LICENSE"
   ],
   "license": "MIT",
@@ -48,19 +50,28 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --run build && node --test test/*.test.ts",
+    "link-dsh": "node scripts/link-dsh.mjs",
+    "test": "node --run build && node scripts/link-dsh.mjs && node --test test/*.test.ts",
     "check": "node --run typecheck && node --run test",
     "prepack": "node --run build"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2"
-  },
-  "peerDependenciesMeta": {
-    "@deepseek-ai/cordis": {
-      "optional": true
-    }
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-commands": "^0.1.5-rc.1",
+    "@deepseek-ai/dsh-llm": "^0.1.5-rc.1",
+    "@deepseek-ai/dsh-settings": "^0.1.5-rc.1",
+    "@deepseek-ai/dsh-system-prompt": "^0.1.5-rc.1",
+    "@deepseek-ai/dsh-tools": "^0.1.5-rc.1",
+    "@deepseek-ai/schemastery": "^3.18.2"
   },
   "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-commands": "^0.1.5-rc.1",
+    "@deepseek-ai/dsh-llm": "^0.1.5-rc.1",
+    "@deepseek-ai/dsh-settings": "^0.1.5-rc.1",
+    "@deepseek-ai/dsh-system-prompt": "^0.1.5-rc.1",
+    "@deepseek-ai/dsh-tools": "^0.1.5-rc.1",
+    "@deepseek-ai/schemastery": "^3.18.2",
     "@types/node": "^22.0.0",
     "typescript": "^5.9.0"
   },

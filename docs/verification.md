@@ -148,7 +148,7 @@ $ dsh --profile web --dump-config | grep -A5 "^- id: rtk"
 
 ### 6.2 命令确实被改写（决定性证据）
 
-重启宿主后，模型发出 `ls -la /home/wings/.agents/`（**不带管道**），实际返回：
+重启宿主后，模型发出 `ls -la $HOME/.agents/`（**不带管道**），实际返回：
 
 ```
 755  .git/
@@ -162,7 +162,7 @@ $ dsh --profile web --dump-config | grep -A5 "^- id: rtk"
 这是 rtk 的 token-optimized 格式——权限位折叠成八进制、无 owner/日期列、目录在前、大小带单位。同一目录的原生格式是：
 
 ```
-$ /bin/ls -la /home/wings/.agents/ | head -3
+$ /bin/ls -la $HOME/.agents/ | head -3
 -rw-r--r-- 1 wings wings  796  .gitignore
 ```
 

@@ -1,5 +1,12 @@
 # dsh-rtk
 
+[![CI](https://github.com/wings1848/dsh-rtk/actions/workflows/ci.yml/badge.svg)](https://github.com/wings1848/dsh-rtk/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/wings1848/dsh-rtk/actions/workflows/codeql.yml/badge.svg)](https://github.com/wings1848/dsh-rtk/actions/workflows/codeql.yml)
+[![Secrets](https://github.com/wings1848/dsh-rtk/actions/workflows/secrets.yml/badge.svg)](https://github.com/wings1848/dsh-rtk/actions/workflows/secrets.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/wings1848/dsh-rtk/blob/main/LICENSE)
+[![Node](https://img.shields.io/badge/node-%3E%3D22.18.0-brightgreen.svg)](https://nodejs.org)
+[![English](https://img.shields.io/badge/README-English-blue)](https://github.com/wings1848/dsh-rtk/blob/main/README.md)
+
 给 [DeepSeek Harness](https://github.com/deepseek-ai/dsh) 用的 RTK 命令重写 + 工具输出压缩插件。
 
 `dsh-rtk` 会在 `bash` 命令执行前把它改写成等价的 [rtk](https://github.com/rtk-ai/rtk) 命令，并在工具输出进入模型上下文前压缩它。它是 [`pi-rtk-optimizer`](https://github.com/MasuRii/pi-rtk-optimizer) 在 harness 插件模型上的移植。
@@ -11,6 +18,8 @@
             Modified: 2 files
               src/a.ts
 ```
+
+![How dsh-rtk works](https://raw.githubusercontent.com/wings1848/dsh-rtk/main/docs/assets/how-it-works.svg)
 
 ## 功能
 

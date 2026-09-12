@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 840 500" width="840" height="500" role="img" aria-label="dsh-rtk rewrites bash commands to rtk and compacts the result before the model sees it">
+  <title>How dsh-rtk works</title>
+  <desc>A command flows from the model through a rewrite stage to rtk, then through a compaction stage back to the model. Measured on git status: 1050 characters become 215, an 80% reduction.</desc>
+
+  <!-- Opaque background: GitHub and npm render on both light and dark themes, so
+       a transparent plate designed for one of them smears on the other. -->
+  <rect width="840" height="500" fill="#f8fafc"/>
+  <rect x="0.5" y="0.5" width="839" height="499" fill="none" stroke="#e2e8f0"/>
+
+  <text x="32" y="52" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="25" font-weight="700" fill="#0f172a">dsh-rtk</text>
+  <text x="32" y="78" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" font-size="14" fill="#64748b">rewrites bash commands to rtk, then compacts what comes back</text>
+
+  <!-- Stage 1: what the model asked for -->
+  <rect x="32" y="104" width="776" height="72" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="52" y="132" font-family="system-ui, -apple-system, sans-serif" font-size="12" font-weight="600" fill="#94a3b8" letter-spacing="0.6">THE MODEL ASKS FOR</text>
+  <text x="52" y="160" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="17" fill="#0f172a">git status</text>
+
+  <!-- connector -->
+  <line x1="120" y1="176" x2="120" y2="212" stroke="#0ea5e9" stroke-width="2"/>
+  <path d="M120 220 L115 210 L125 210 Z" fill="#0ea5e9"/>
+  <text x="140" y="203" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="600" fill="#0284c7">tools/execute</text>
+  <text x="258" y="203" font-family="system-ui, -apple-system, sans-serif" font-size="13" fill="#64748b">— argument replaced for this call only</text>
+
+  <!-- Stage 2: what actually runs -->
+  <rect x="32" y="228" width="776" height="72" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="52" y="256" font-family="system-ui, -apple-system, sans-serif" font-size="12" font-weight="600" fill="#94a3b8" letter-spacing="0.6">WHAT ACTUALLY RUNS</text>
+  <text x="52" y="284" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="17" fill="#0f172a">rtk git status</text>
+  <text x="330" y="284" font-family="system-ui, -apple-system, sans-serif" font-size="12.5" fill="#94a3b8">rtk stays the source of truth — it decides what it supports</text>
+
+  <!-- connector -->
+  <line x1="120" y1="300" x2="120" y2="336" stroke="#10b981" stroke-width="2"/>
+  <path d="M120 344 L115 334 L125 334 Z" fill="#10b981"/>
+  <text x="140" y="327" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="600" fill="#059669">tools/post-execute</text>
+  <text x="290" y="327" font-family="system-ui, -apple-system, sans-serif" font-size="13" fill="#64748b">— body summarized, status markers kept</text>
+
+  <!-- Stage 3: what the model sees -->
+  <rect x="32" y="352" width="776" height="116" rx="10" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="52" y="380" font-family="system-ui, -apple-system, sans-serif" font-size="12" font-weight="600" fill="#94a3b8" letter-spacing="0.6">THE MODEL SEES</text>
+  <text x="52" y="412" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#0f172a">Branch: main</text>
+  <text x="52" y="434" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#0f172a">Modified: 2 files</text>
+  <text x="52" y="456" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#0f172a">[exit code: 0]</text>
+
+  <!-- measured outcome -->
+  <rect x="470" y="394" width="318" height="56" rx="8" fill="#ecfdf5" stroke="#a7f3d0"/>
+  <text x="490" y="418" font-family="system-ui, -apple-system, sans-serif" font-size="13" fill="#065f46">measured on a 40-file repo</text>
+  <text x="490" y="440" font-family="system-ui, -apple-system, sans-serif" font-size="15" font-weight="700" fill="#047857">1050 &#8594; 215 chars  (&#8722;80%)</text>
+</svg>
