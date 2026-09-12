@@ -347,3 +347,37 @@ describe('spill coordination', () => {
     assert.ok(text.length > 0 && text.length <= 2100, `an opted-out row must keep its budget, got ${text.length} chars`)
   })
 })
+
+describe('settings integration', () => {
+  it('registers its namespace when the settings service is available', () => {
+    const registered: Array<{ ns: string; base: unknown }> = []
+    const watched: number[] = []
+    const settings = {
+      register: (ns: string, _schema: unknown, options?: { base?: unknown }) => {
+        registered.push({ ns, base: options?.base })
+        return {
+          get: () => ({}),
+          watch: () => {
+            watched.push(1)
+            return () => {}
+          },
+          update: async () => {},
+          replace: async () => {},
+        }
+      },
+      get: () => undefined,
+    }
+
+    const harness = fakeContext({ settings })
+    apply(harness.ctx, normalizeConfig({ enabled: true, mode: 'rewrite' }) as never)
+
+    assert.deepEqual(registered.map((entry) => entry.ns), ['dsh-rtk'])
+    assert.equal(watched.length, 1, 'the plugin must observe later settings edits')
+  })
+
+  it('still works when the service never shows up', () => {
+    const harness = fakeContext()
+    assert.doesNotThrow(() => apply(harness.ctx, normalizeConfig({}) as never))
+    assert.ok(harness.listeners.has('tools/execute'), 'the rewriting half must still register')
+  })
+})

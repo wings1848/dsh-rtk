@@ -23,11 +23,22 @@ export const name = 'rtk'
 /**
  * The tool runtime is a hard dependency: both halves of this plugin are
  * `tools/*` listeners, and without the registry there is nothing to rewrite or
- * compact. Everything else — commands, settings, the prompt registry — is
- * optional and resolved with `ctx.get`, so a composition that omits them still
- * gets the optimization.
+ * compact.
+ *
+ * `settings` is declared too, and not because the plugin cannot run without it
+ * — it can, entirely from the composition's `config:` block. It is declared
+ * because the provider registers *asynchronously*: it reads the settings
+ * document first, so a plain `ctx.get('settings')` during `apply` can find
+ * nothing and the namespace silently never registers. Observed exactly that in
+ * production (`/rtk` reported "settings service unavailable" while a sibling
+ * `ctx.get('spillStore')` succeeded). Declaring it makes Cordis park this
+ * plugin until the provider appears, then activate it.
+ *
+ * `commands` and `systemPrompt` stay optional `ctx.get` lookups: they are
+ * registered early enough to be present, and a composition without them should
+ * still get the optimization.
  */
-export const inject = ['tools']
+export const inject = ['tools', 'settings']
 
 export { Config }
 
