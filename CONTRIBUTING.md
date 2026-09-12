@@ -66,3 +66,54 @@ argue against the note that put it there.
 Contributions are accepted under the MIT licence in [LICENSE](LICENSE). By
 opening a pull request you confirm you have the right to submit the work under
 those terms.
+
+## Releasing
+
+The published package is `@wingsbutterfly/dsh-rtk` (the GitHub owner and the npm
+account differ on purpose). Publications run through `.github/workflows/release.yml`
+on a `v*` tag, using npm **Trusted Publishing** — the job exchanges its OIDC token
+for a short-lived credential, so there is no `NPM_TOKEN` to leak or rotate. Never
+add one.
+
+### The first release has to be published by hand
+
+A trusted publisher can only be configured for a package that already exists on
+the registry, which is a chicken-and-egg problem the first time. Run this in your
+**own interactive terminal** — 2FA is required, and the browser hand-off link is
+masked in a non-TTY:
+
+```bash
+# 1. Log in to the public registry. The machine's default registry is a mirror,
+#    which will not accept a publish.
+npm login --registry=https://registry.npmjs.org/
+npm whoami --registry=https://registry.npmjs.org/
+
+# 2. Publish the version in package.json.
+cd path/to/dsh-rtk
+npm publish --registry=https://registry.npmjs.org/
+
+# 3. Register this repository's release workflow as a trusted publisher.
+#    `--allow-publish` is the flag people miss: without it the workflow may only
+#    stage a publish, and `npm publish` inside it fails even though the setup
+#    looked successful. Provider and fields cannot be edited afterwards.
+npm trust github @wingsbutterfly/dsh-rtk \
+  --file release.yml \
+  --repo wings1848/dsh-rtk \
+  --allow-publish \
+  --registry=https://registry.npmjs.org/
+```
+
+`release.yml` is idempotent, so re-running it for a version already on npm is a
+notice rather than a red X — which matters, because a failing badge teaches people
+to ignore badges.
+
+### Subsequent releases
+
+Bump the version in `package.json` and `CHANGELOG.md`, commit, then tag:
+
+```bash
+git tag -a v0.1.1 -m "v0.1.1" && git push origin v0.1.1
+```
+
+The tag must match the `package.json` version; the workflow publishes whatever is
+in the manifest, not what the tag says.
