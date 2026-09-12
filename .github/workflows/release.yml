@@ -50,13 +50,38 @@ jobs:
       # publisher can only be configured for a package that already exists), so
       # re-running this job for that same version must be a no-op rather than a
       # red X. A failing badge teaches people to ignore badges.
+      #
+      # The check is done by *attempting the publish and reading the refusal*,
+      # not by asking `npm view` first. The read endpoint is served from a cache
+      # that lags a fresh publish by minutes, so a `npm view` guard answers "not
+      # published yet" for a version that is already there, and the publish that
+      # follows fails with a 403 that looks like an auth problem. Observed
+      # exactly that on the first release.
       - name: publish, unless this version is already on npm
         run: |
-          set -euo pipefail
+          set -uo pipefail
           pkg=$(node -p "require('./package.json').name")
           version=$(node -p "require('./package.json').version")
-          if npm view "${pkg}@${version}" version >/dev/null 2>&1; then
-            echo "::notice::${pkg}@${version} is already on npm; skipping."
+
+          set +e
+          output=$(npm publish --provenance --access public 2>&1)
+          code=$?
+          set -e
+
+          if [ "$code" -eq 0 ]; then
+            echo "$output"
+            echo "::notice::published ${pkg}@${version}"
             exit 0
           fi
-          npm publish --provenance --access public
+
+          printf '%s\n' "$output"
+
+          # A refusal that names the version as already published is the
+          # successful outcome of a re-run, not a failure.
+          if printf '%s' "$output" | grep -q 'previously published versions'; then
+            echo "::notice::${pkg}@${version} is already on npm; nothing to do."
+            exit 0
+          fi
+
+          echo "::error::publish failed with exit ${code}"
+          exit "$code"
