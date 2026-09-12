@@ -37,7 +37,7 @@
 |---|---|---|---|---|
 | 1 | 类型检查通过（用真实 harness 类型） | `tsc -p tsconfig.json --noEmit` | 无输出、exit 0 | PASS |
 | 2 | 构建产出 `lib/` | `tsc -p tsconfig.json && ls lib/index.js` | 文件存在 | PASS |
-| 3 | 全部测试通过 | `node --test test/*.test.ts` | `pass 63 / fail 0` | PASS |
+| 3 | 全部测试通过 | `node --test test/*.test.ts` | `pass 84 / fail 0` | PASS |
 | 4 | 模块导出符合 cordis 插件约定 | `node -e "import('./lib/index.js').then(m=>console.log(Object.keys(m)))"` | `Config, apply, inject, name`（与 `dsh-tool-bash` 同约定） | PASS |
 | 5 | 从 preset 目录可解析裸模块名 | `cd ~/.dsh/.agent-presets/rtk && node -e "import('dsh-rtk')"` | 解析成功，`name=rtk`、`inject=['tools']` | PASS |
 | 6 | preset 能被真实组合引擎挂载 | 动态插件调用 `agentPresets.standingKeyFor('rtk')` | `MOUNT OK` | PASS |
@@ -85,7 +85,7 @@
 
 恢复后复测：`tests 50 / pass 50 / fail 0`。
 
-> 两次验红都在 `test/compact.test.ts` 上做，因为这两条正是默认开启路径上的不变量。后续加入 `test/integration.test.ts` 后总数为 63。
+> 两次验红都在 `test/compact.test.ts` 上做，因为这两条正是默认开启路径上的不变量。验红当时套件为 50 项；补入 `integration.test.ts`（`apply()` 接线 + 真实 rtk 二进制）与 `plugin-surface.test.ts`（可执行解析、运行时守卫、统计、`/rtk` 全部子命令）后总数为 84。
 
 ---
 
@@ -146,7 +146,7 @@
 3. 运行 `/rtk verify` 应报告 rtk 可用；运行 `/rtk stats` 应报告本次会话的压缩收益。
 4. 对照：在同一会话里运行 `echo hi`（rtk 无等价命令）应原样执行。
 
-**已就位的前置证据**：`rtk` preset 已通过真实组合引擎的 mount 验证（`MOUNT OK`），模块名从 preset 目录可解析，且 `apply()` 的全部接线与真实 rtk 二进制的交互已由 63 项测试覆盖。
+**已就位的前置证据**：`rtk` preset 已通过真实组合引擎的 mount 验证（`MOUNT OK`），模块名从 preset 目录可解析，且 `apply()` 的全部接线与真实 rtk 二进制的交互已由 84 项测试覆盖。
 
 ---
 
