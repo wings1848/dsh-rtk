@@ -42,7 +42,7 @@
 | 5 | 从 preset 目录可解析裸模块名 | `cd ~/.dsh/.agent-presets/rtk && node -e "import('dsh-rtk')"` | 解析成功，`name=rtk`、`inject=['tools']` | PASS |
 | 6 | preset 能被真实组合引擎挂载 | 动态插件调用 `agentPresets.standingKeyFor('rtk')` | `MOUNT OK` | PASS |
 | 7 | host patch 语法正确并被组合 | `dsh --profile web --dump-config \| grep -A3 "id: rtk"` | 组合树中出现 `- id: rtk / name: dsh-rtk` | PASS（该方案随后按第 5 节回滚） |
-| 8 | bash 真被改写（端到端） | 在挂载 rtk preset 的会话中运行 `ls -la` | 输出为 rtk 紧凑格式 | 见第 6 节 |
+| 8 | bash 真被改写（端到端） | 在**新建**的、preset 选 `rtk` 的会话中运行 `ls -la` | 输出为 rtk 紧凑格式 | **待新会话确认**——同会话内切换被 harness 拒绝，见第 6 节 |
 
 ---
 
@@ -129,9 +129,24 @@
 
 ---
 
-## 6. 端到端验证
+## 6. 端到端验证（在同一会话内无法完成，附证据）
 
-见第 8 节「端到端」——在挂载了 `rtk` preset 的真实会话中运行 `ls -la`，确认命令真被 rtk 接管。
+曾尝试把**正在运行的会话**重挂到 `rtk` preset，以便在进程内取到端到端证据。`agentPresets.select` 明确拒绝：
+
+```
+[rtk-switch] SELECT FAIL: session "session-44856891-97cb-44d9-a8ab-ea4691871430" has already started; its agent preset is fixed
+```
+
+**preset 在会话创建时锁定**，这是 harness 的设计约束，不是实现缺陷。`SubagentStartRequest` 也没有 preset 覆盖字段（只有 `label`/`prompt`/`parent`/`signal`/`agentOptions`），所以 subagent 同样继承父会话的 preset，无法用来验证。
+
+因此第 8 项只能由**新建会话**完成。可复现步骤：
+
+1. 在 Web GUI 新建一个会话，preset 选 `rtk`（磁盘上已就绪：`~/.dsh/.agent-presets/rtk/agent.cordis.yml`）。
+2. 运行 `ls -la`。若 dsh-rtk 生效，实际执行的是 `rtk ls -la`，输出为 rtk 的紧凑格式（无权限位/owner/日期列）。
+3. 运行 `/rtk verify` 应报告 rtk 可用；运行 `/rtk stats` 应报告本次会话的压缩收益。
+4. 对照：在同一会话里运行 `echo hi`（rtk 无等价命令）应原样执行。
+
+**已就位的前置证据**：`rtk` preset 已通过真实组合引擎的 mount 验证（`MOUNT OK`），模块名从 preset 目录可解析，且 `apply()` 的全部接线与真实 rtk 二进制的交互已由 63 项测试覆盖。
 
 ---
 
