@@ -1,0 +1,62 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # Trusted Publishing: the job exchanges this for a short-lived npm credential,
+  # so there is no NPM_TOKEN to leak or rotate. Do not add one.
+  id-token: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: publish to npm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - run: pnpm install --frozen-lockfile
+
+      # The suite drives the real rtk binary, so the releasing commit is verified
+      # the same way CI verifies it rather than trusted because the tag exists.
+      - name: Install rtk
+        run: |
+          set -euo pipefail
+          version=$(curl -fsSL https://api.github.com/repos/rtk-ai/rtk/releases/latest \
+            | python3 -c "import json,sys; print(json.load(sys.stdin)['tag_name'])")
+          mkdir -p "$RUNNER_TEMP/rtk"
+          curl -fsSL -o "$RUNNER_TEMP/rtk.tar.gz" \
+            "https://github.com/rtk-ai/rtk/releases/download/${version}/rtk-x86_64-unknown-linux-musl.tar.gz"
+          tar -xzf "$RUNNER_TEMP/rtk.tar.gz" -C "$RUNNER_TEMP/rtk"
+          sudo install -m 0755 "$(find "$RUNNER_TEMP/rtk" -type f -name rtk | head -1)" /usr/local/bin/rtk
+          rtk --version
+
+      - run: pnpm run check
+
+      # Idempotent on purpose: the first release is published by hand (a trusted
+      # publisher can only be configured for a package that already exists), so
+      # re-running this job for that same version must be a no-op rather than a
+      # red X. A failing badge teaches people to ignore badges.
+      - name: publish, unless this version is already on npm
+        run: |
+          set -euo pipefail
+          pkg=$(node -p "require('./package.json').name")
+          version=$(node -p "require('./package.json').version")
+          if npm view "${pkg}@${version}" version >/dev/null 2>&1; then
+            echo "::notice::${pkg}@${version} is already on npm; skipping."
+            exit 0
+          fi
+          npm publish --provenance --access public

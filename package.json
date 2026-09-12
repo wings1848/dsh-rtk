@@ -1,5 +1,5 @@
 {
-  "name": "dsh-rtk",
+  "name": "@wingsbutterfly/dsh-rtk",
   "version": "0.1.0",
   "description": "RTK command rewriting and tool-output compaction for the DeepSeek Harness: rewrites bash commands to their rtk equivalents and compacts noisy tool output before it reaches the model.",
   "type": "module",

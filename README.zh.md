@@ -66,18 +66,17 @@
 
 ## 安装
 
-### 1. 让包可被解析
-
-装进 profile：
+### 1. 安装包
 
 ```bash
-dsh plugin --profile web add /path/to/dsh-rtk
+dsh plugin --profile web add @wingsbutterfly/dsh-rtk
 ```
 
-或者软链到组合能解析裸模块名的位置：
+想从本地检出直接用？软链到组合能解析裸模块名的位置：
 
 ```bash
-ln -s /path/to/dsh-rtk ~/.dsh/node_modules/dsh-rtk
+mkdir -p ~/.dsh/node_modules/@wingsbutterfly
+ln -s /path/to/dsh-rtk ~/.dsh/node_modules/@wingsbutterfly/dsh-rtk
 ```
 
 ### 2. 给一个 agent preset 加一行
@@ -86,7 +85,7 @@ ln -s /path/to/dsh-rtk ~/.dsh/node_modules/dsh-rtk
 
 ```yaml
 - id: rtk
-  name: 'dsh-rtk'
+  name: '@wingsbutterfly/dsh-rtk'
   config:
     enabled: true
     mode: rewrite
@@ -107,7 +106,7 @@ agentPresets.copy('standard', 'rtk', 'RTK 优化')
 
 ```yaml
 - id: rtk
-  name: 'dsh-rtk'
+  name: '@wingsbutterfly/dsh-rtk'
   config:
     enabled: true                    # 总开关
     mode: rewrite                    # rewrite | suggest
@@ -199,6 +198,13 @@ pnpm run check        # typecheck + test
 测试 import 的是 `lib/`，所以 `pnpm test` 会先构建；否则只改 `src/` 而没构建的回归会静默通过。
 
 `test/integration.test.ts` 用替身上下文驱动真实的 `apply()`，并调用真实的 `rtk` 二进制，所以在没装 rtk 的机器上会失败——这是有意的：重写路径就是这个功能本身。
+
+## Star history
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/wings1848/dsh-rtk/output/star-history-dark.svg">
+  <img alt="Star history chart" src="https://raw.githubusercontent.com/wings1848/dsh-rtk/output/star-history-light.svg">
+</picture>
 
 ## 许可证
 

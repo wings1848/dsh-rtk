@@ -65,18 +65,18 @@ With `deferToHarnessSpill` on (the default) the plugin turns its own truncation 
 
 ## Install
 
-### 1. Make the package resolvable
-
-Either install it into the profile:
+### 1. Install the package
 
 ```bash
-dsh plugin --profile web add /path/to/dsh-rtk
+dsh plugin --profile web add @wingsbutterfly/dsh-rtk
 ```
 
-or link it where the composition resolves bare specifiers:
+Working from a checkout instead? Link it where the composition resolves bare
+specifiers:
 
 ```bash
-ln -s /path/to/dsh-rtk ~/.dsh/node_modules/dsh-rtk
+mkdir -p ~/.dsh/node_modules/@wingsbutterfly
+ln -s /path/to/dsh-rtk ~/.dsh/node_modules/@wingsbutterfly/dsh-rtk
 ```
 
 ### 2. Add one row to an agent preset
@@ -85,7 +85,7 @@ ln -s /path/to/dsh-rtk ~/.dsh/node_modules/dsh-rtk
 
 ```yaml
 - id: rtk
-  name: 'dsh-rtk'
+  name: '@wingsbutterfly/dsh-rtk'
   config:
     enabled: true
     mode: rewrite
@@ -106,7 +106,7 @@ Every field is optional; defaults are shown.
 
 ```yaml
 - id: rtk
-  name: 'dsh-rtk'
+  name: '@wingsbutterfly/dsh-rtk'
   config:
     enabled: true                    # master switch
     mode: rewrite                    # rewrite | suggest
@@ -201,6 +201,13 @@ The tests import `lib/`, so `pnpm test` builds before it runs; a `src/` edit tha
 The port's acceptance evidence, including the eight defects later reviews and live testing surfaced, is in [https://github.com/wings1848/dsh-rtk/blob/main/docs/verification.md](https://github.com/wings1848/dsh-rtk/blob/main/docs/verification.md).
 
 `test/integration.test.ts` drives the real `apply()` through a stand-in context and calls the real `rtk` binary, so it fails on a machine without rtk installed — that is intentional: the rewrite path is the feature.
+
+## Star history
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/wings1848/dsh-rtk/output/star-history-dark.svg">
+  <img alt="Star history chart" src="https://raw.githubusercontent.com/wings1848/dsh-rtk/output/star-history-light.svg">
+</picture>
 
 ## License
 
