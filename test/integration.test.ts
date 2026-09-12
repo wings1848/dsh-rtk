@@ -295,3 +295,55 @@ describe('missing-rtk notice', () => {
     assert.doesNotMatch(text, /rtk not found/)
   })
 })
+
+describe('spill coordination', () => {
+  /** A result far larger than the plugin's own 12 000-character budget. */
+  const huge = 'x'.repeat(30000)
+
+  async function postExecute(harness: ReturnType<typeof fakeContext>) {
+    const exec = { name: 'bash', callId: 'big-1', arguments: { command: 'cat huge' }, signal: new AbortController().signal }
+    return harness.emit(
+      'tools/post-execute',
+      exec,
+      { isError: false, value: 'ok', content: [{ type: 'text', text: huge }] },
+      async () => ({ kind: 'accept' }),
+    )
+  }
+
+  it('steps aside when the harness bounds oversized output itself', async () => {
+    // `spillStore` present == dsh-spill-policy is mounted, so the recoverable
+    // spill path owns large results and this plugin must not pre-empt it.
+    const harness = fakeContext({ spillStore: {} })
+    apply(harness.ctx, normalizeConfig({}) as never)
+
+    const decision = await postExecute(harness)
+    const text = (decision.content ?? []).map((block: { text: string }) => block.text).join('')
+    assert.ok(
+      text.length === 0 || text.length > 12000,
+      `spill should own this result, but it was truncated to ${text.length} chars`,
+    )
+  })
+
+  it('still truncates when spill is not mounted', async () => {
+    const harness = fakeContext()
+    apply(harness.ctx, normalizeConfig({}) as never)
+
+    const decision = await postExecute(harness)
+    const text = (decision.content ?? []).map((block: { text: string }) => block.text).join('')
+    assert.ok(text.length > 0 && text.length <= 13000, `expected a bounded result, got ${text.length} chars`)
+  })
+
+  it('keeps its own bound when a row opts out of deferring', async () => {
+    const harness = fakeContext({ spillStore: {} })
+    apply(
+      harness.ctx,
+      normalizeConfig({
+        outputCompaction: { deferToHarnessSpill: false, truncate: { enabled: true, maxChars: 2000 } },
+      }) as never,
+    )
+
+    const decision = await postExecute(harness)
+    const text = (decision.content ?? []).map((block: { text: string }) => block.text).join('')
+    assert.ok(text.length > 0 && text.length <= 2100, `an opted-out row must keep its budget, got ${text.length} chars`)
+  })
+})

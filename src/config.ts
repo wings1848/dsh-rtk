@@ -42,6 +42,11 @@ export interface OutputCompactionConfig {
   aggregateLinterOutput: boolean
   groupSearchOutput: boolean
   trackSavings: boolean
+  /**
+   * Yield oversized results to the harness's own spill policy when it is
+   * mounted, instead of hard-truncating them first.
+   */
+  deferToHarnessSpill: boolean
   smartTruncate: SmartTruncateConfig
   truncate: TruncateConfig
 }
@@ -93,6 +98,12 @@ export const DEFAULT_CONFIG: RtkConfig = {
     aggregateLinterOutput: true,
     groupSearchOutput: true,
     trackSavings: true,
+    // The harness spill policy truncates recoverably (full output on disk,
+    // head/tail preview inline); this plugin's hard truncation does not. It
+    // also runs first, so at 12 000 characters it fires far below spill's
+    // threshold and spill never sees a large result. Deferring is the default;
+    // `false` keeps this plugin's own bound even when spill is mounted.
+    deferToHarnessSpill: true,
     smartTruncate: { enabled: false, maxLines: 220 },
     truncate: { enabled: true, maxChars: 12000 },
   },
@@ -154,6 +165,7 @@ export const Config = z.object({
       aggregateLinterOutput: z.boolean().default(true),
       groupSearchOutput: z.boolean().default(true),
       trackSavings: z.boolean().default(true),
+      deferToHarnessSpill: z.boolean().default(true),
       smartTruncate: z.object({
         enabled: z.boolean().default(false),
         maxLines: z.natural().default(DEFAULT_CONFIG.outputCompaction.smartTruncate.maxLines),
@@ -237,6 +249,7 @@ export function normalizeConfig(raw: unknown): RtkConfig {
       aggregateLinterOutput: pickBoolean(compaction.aggregateLinterOutput, DEFAULT_CONFIG.outputCompaction.aggregateLinterOutput),
       groupSearchOutput: pickBoolean(compaction.groupSearchOutput, DEFAULT_CONFIG.outputCompaction.groupSearchOutput),
       trackSavings: pickBoolean(compaction.trackSavings, DEFAULT_CONFIG.outputCompaction.trackSavings),
+      deferToHarnessSpill: pickBoolean(compaction.deferToHarnessSpill, DEFAULT_CONFIG.outputCompaction.deferToHarnessSpill),
       smartTruncate: {
         enabled: pickBoolean(smartTruncate.enabled, DEFAULT_CONFIG.outputCompaction.smartTruncate.enabled),
         maxLines: pickNumber(smartTruncate.maxLines, DEFAULT_CONFIG.outputCompaction.smartTruncate.maxLines, BOUNDS.maxLines.min, BOUNDS.maxLines.max),

@@ -44,6 +44,13 @@
 
 - **压缩绝不把结果变大。** 如果某个技术不能真正缩短文本，就保留原文并且不上报。
 
+### 超大输出归 harness 管
+
+`dsh-spill-policy` 挂载时，它会把完整结果落盘、上下文里只留头尾预览——这种截断是**可恢复的**。而本插件的硬截断不可恢复，且**跑在前面**：默认 12000 字符的阈值远低于 spill 的 50000 字节阈值，于是 spill 根本看不到大结果，那个本可以让读者看到剩余内容的落盘文件也就永远不会产生。
+
+`deferToHarnessSpill` 开启时（默认），只要 spill 服务在场，插件就关掉自己的截断，让失控命令的输出保持可读。设为 `false` 则无论 spill 是否挂载都保留插件自己的上限。
+
+
 ### 会话统计
 
 `/rtk stats` 报告本次会话省下多少字符，按工具与按技术两个维度。
@@ -114,6 +121,7 @@ agentPresets.copy('standard', 'rtk', 'RTK 优化')
       aggregateLinterOutput: true
       groupSearchOutput: true
       trackSavings: true
+      deferToHarnessSpill: true      # 把超大输出让给 harness 的 spill 策略
       smartTruncate:
         enabled: false
         maxLines: 220                # 40–4000

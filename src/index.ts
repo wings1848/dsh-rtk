@@ -88,7 +88,36 @@ function needsSourceFilterNote(config: RtkConfig): boolean {
  * @param rawConfig - the row's `config:` block, already schema-validated.
  */
 export function apply(ctx: Context, rawConfig: RtkConfig): void {
-  let config = normalizeConfig(rawConfig)
+  /**
+   * Whether the harness bounds oversized results itself.
+   *
+   * `dsh-spill-policy` writes a full output to disk and keeps a head/tail
+   * preview inline, so it truncates *recoverably*. This plugin's own hard
+   * truncation is lossy, and it runs first: at 12 000 characters it fires far
+   * below spill's threshold (50 000 by default), so spill never sees a large
+   * result at all and the reader loses the spill file that would have let them
+   * read the rest. When spill is mounted this plugin steps aside; when it is
+   * not, the truncation stays as the only bound on a runaway command.
+   */
+  const spillHandlesLargeOutput = ctx.get('spillStore') !== undefined
+
+  /**
+   * Apply the spill coordination to a freshly resolved configuration.
+   *
+   * Gated on an explicit switch rather than on "did the row set truncate?":
+   * the loader hands this function a schema-resolved config where every field
+   * already carries its default, so an absent key is indistinguishable from an
+   * explicit one. `deferToHarnessSpill: false` is how a row keeps its own
+   * bound regardless.
+   */
+  function coordinate(next: RtkConfig): RtkConfig {
+    if (spillHandlesLargeOutput && next.outputCompaction.deferToHarnessSpill) {
+      next.outputCompaction.truncate.enabled = false
+    }
+    return next
+  }
+
+  let config = coordinate(normalizeConfig(rawConfig))
   let runtimeStatus: RtkRuntimeStatus = { rtkAvailable: false }
   const metrics = createMetricsTracker()
   /** Rewrite decisions awaiting their result, keyed by call id, for `suggest` mode. */
@@ -116,19 +145,19 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
     try {
       const scope = settings.register('dsh-rtk', Config, { base: rawConfig })
       ownedScope = scope as unknown as SettingsScope<unknown>
-      config = normalizeConfig(scope.get())
+      config = coordinate(normalizeConfig(scope.get()))
       scope.watch((next) => {
-        config = normalizeConfig(next)
+        config = coordinate(normalizeConfig(next))
         applySourceFilterNote()
       })
       settingsNote = 'the `dsh-rtk` namespace in the harness settings document'
     } catch (error) {
       settingsNote = `settings namespace unavailable (${error instanceof Error ? error.message : String(error)}) — configuration comes from the composition only`
       const existing = settings.get('dsh-rtk')
-      if (existing !== undefined) config = normalizeConfig(existing)
+      if (existing !== undefined) config = coordinate(normalizeConfig(existing))
       ctx.on('settings/updated', (ns: string, next: unknown) => {
         if (ns !== 'dsh-rtk') return
-        config = normalizeConfig(next)
+        config = coordinate(normalizeConfig(next))
         applySourceFilterNote()
       })
     }
@@ -348,7 +377,7 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
       resetConfig: async () => {
         if (ownedScope === undefined) return
         await ownedScope.replace({})
-        config = normalizeConfig(settings?.get('dsh-rtk'))
+        config = coordinate(normalizeConfig(settings?.get('dsh-rtk')))
       },
       getRuntimeStatus: () => runtimeStatus,
       refreshRuntimeStatus,

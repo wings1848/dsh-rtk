@@ -43,6 +43,13 @@ Two properties are load-bearing:
 - **The harness contract survives.** A `bash` result ends with status markers — `[exit code: N]`, `[stderr]`, `[timed out after …]`, `[sandbox: …]`. Compaction lifts those out before rewriting the body and puts them back afterwards; the model is told to check `[exit code: N]` on every call, and the Web UI parses that same line for its exit-status pill.
 - **Compaction never inflates a result.** If a technique would not actually shrink the text, the original is kept and nothing is reported.
 
+### Oversized output belongs to the harness
+
+When `dsh-spill-policy` is mounted, it writes a full result to disk and keeps a head/tail preview inline — that truncation is **recoverable**. This plugin's own hard truncation is not, and it runs first: at its 12 000-character default it fires far below spill's 50 000-byte threshold, so spill never sees a large result at all and the file that would have let a reader see the rest is never written.
+
+With `deferToHarnessSpill` on (the default) the plugin turns its own truncation off whenever the spill service is present, so a runaway command's output stays readable. Set it to `false` to keep the plugin's bound regardless.
+
+
 ### Session metrics
 
 `/rtk stats` reports how many characters compaction saved, per tool and per technique.
@@ -113,6 +120,7 @@ Every field is optional; defaults are shown.
       aggregateLinterOutput: true
       groupSearchOutput: true
       trackSavings: true
+      deferToHarnessSpill: true      # let the harness spill policy own oversized output
       smartTruncate:
         enabled: false
         maxLines: 220                # 40–4000
