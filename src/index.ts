@@ -187,7 +187,13 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
     if (!decision.changed) return next()
 
     const command = applyRtkHistoryScope(decision.rewrittenCommand, rtkHistoryDbPath(), process.env.RTK_DB_PATH)
-    if (config.showRewriteNotifications) pendingSuggestions.set(exec.callId, `[rtk] rewrote: ${decision.originalCommand} -> ${decision.rewrittenCommand}`)
+    if (config.showRewriteNotifications) {
+      // A cancelled call can be finalized on the `final-result` path, which
+      // bypasses post-execute and would leave its entry behind. The map is
+      // bounded so a notification nobody reads cannot grow without limit.
+      if (pendingSuggestions.size > 256) pendingSuggestions.clear()
+      pendingSuggestions.set(exec.callId, `[rtk] rewrote: ${decision.originalCommand} -> ${decision.rewrittenCommand}`)
+    }
 
     // `arguments` is declared readonly, but the around-dispatch stage is the
     // one place the registry re-reads it before invoking the body. Restoring it
