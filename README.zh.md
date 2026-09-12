@@ -174,10 +174,12 @@ harness 对 `tools/execute` wrapper 的文档原话是「may change only `exec.s
 
 ```bash
 pnpm run typecheck    # 用真实 harness 类型跑 tsc --noEmit
-pnpm test             # node --test test/
+pnpm test             # 先构建，再跑 node --test test/
 pnpm run build        # 产出 lib/
-pnpm run check        # 以上三项
+pnpm run check        # typecheck + test
 ```
+
+测试 import 的是 `lib/`，所以 `pnpm test` 会先构建；否则只改 `src/` 而没构建的回归会静默通过。
 
 `test/integration.test.ts` 用替身上下文驱动真实的 `apply()`，并调用真实的 `rtk` 二进制，所以在没装 rtk 的机器上会失败——这是有意的：重写路径就是这个功能本身。
 

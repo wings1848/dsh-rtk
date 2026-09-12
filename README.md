@@ -174,10 +174,12 @@ Everything else — the rewrite delegation to `rtk rewrite`, the exit-code contr
 ```bash
 pnpm install          # or link the peer packages manually
 pnpm run typecheck    # tsc --noEmit against the real harness types
-pnpm test             # node --test test/
+pnpm test             # builds first, then runs node --test test/
 pnpm run build        # emit lib/
-pnpm run check        # all three
+pnpm run check        # typecheck + test
 ```
+
+The tests import `lib/`, so `pnpm test` builds before it runs; a `src/` edit that is never built would otherwise pass the suite unnoticed.
 
 `test/integration.test.ts` drives the real `apply()` through a stand-in context and calls the real `rtk` binary, so it fails on a machine without rtk installed — that is intentional: the rewrite path is the feature.
 
