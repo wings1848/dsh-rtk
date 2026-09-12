@@ -3,6 +3,7 @@
 [![CI](https://github.com/wings1848/dsh-rtk/actions/workflows/ci.yml/badge.svg)](https://github.com/wings1848/dsh-rtk/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/wings1848/dsh-rtk/actions/workflows/codeql.yml/badge.svg)](https://github.com/wings1848/dsh-rtk/actions/workflows/codeql.yml)
 [![Secrets](https://github.com/wings1848/dsh-rtk/actions/workflows/secrets.yml/badge.svg)](https://github.com/wings1848/dsh-rtk/actions/workflows/secrets.yml)
+[![npm](https://img.shields.io/npm/v/@wingsbutterfly/dsh-rtk.svg)](https://www.npmjs.com/package/@wingsbutterfly/dsh-rtk)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/wings1848/dsh-rtk/blob/main/LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D22.18.0-brightgreen.svg)](https://nodejs.org)
 [![English](https://img.shields.io/badge/README-English-blue)](https://github.com/wings1848/dsh-rtk/blob/main/README.md)
