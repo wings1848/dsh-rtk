@@ -15,7 +15,9 @@
   "files": [
     "lib",
     "src",
+    "docs",
     "README.md",
+    "README.zh.md",
     "CHANGELOG.md",
     "LICENSE"
   ],
