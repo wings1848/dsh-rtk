@@ -75,7 +75,11 @@ jobs:
           # are resolved by walking up from the importing file, and only the
           # checkout has them installed.
           rm -rf .dist-check && mkdir -p .dist-check
-          tar -xzf dsh-rtk-*.tgz -C .dist-check
+          # npm names a scoped tarball after the scope as well, so this is
+          # `wingsbutterfly-dsh-rtk-<version>.tgz`, not `dsh-rtk-<version>.tgz`.
+          # Globbing the only tarball in the checkout avoids encoding either
+          # shape: the rename is invisible until the package gets a scope.
+          tar -xzf ./*.tgz -C .dist-check
           node --input-type=module -e "
             const plugin = await import('./.dist-check/package/lib/index.js')
             const missing = ['name', 'inject', 'Config', 'apply'].filter(key => plugin[key] === undefined)
