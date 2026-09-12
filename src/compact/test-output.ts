@@ -36,20 +36,42 @@ const FAILURE_START_PATTERNS = [
   /^FAIL\s+/,
   /^FAILED\s+/,
   /^\s*●\s+/,
-  /^\s*✕\s+/,
+  // U+2715 and U+2716 look alike and are both in the wild; `node --test` uses
+  // the heavy form, which a pattern written for the light one silently misses.
+  /^\s*[✕✖]\s+/,
   /^\s*not ok\s+/,
   /test\s+\w+\s+\.\.\.\s*FAILED/,
   /thread\s+'\w+'\s+panicked/,
 ]
 
 const FALLBACK_PASS_PATTERN = /(?:\b(?:ok|PASS)\b|[✓✔])/
-const FALLBACK_FAIL_PATTERN = /(?:\b(?:FAIL|fail)\b|[✗✕])/
+const FALLBACK_FAIL_PATTERN = /(?:\b(?:FAIL|fail)\b|[✗✕✖])/
 
 const MAX_FAILURES = 5
 const MAX_FAILURE_LINES = 4
 const BLANKS_TO_CLOSE_BLOCK = 2
 
+/**
+ * Read `node --test`'s tallies, which it prints on separate lines:
+ * `ℹ tests 2` / `ℹ pass 1` / `ℹ fail 1`.
+ *
+ * These are authoritative — the runner counted them — so they are preferred
+ * over every scraped-marker fallback.
+ */
+function extractNodeTestStats(output: string): Partial<TestSummary> | undefined {
+  const passed = output.match(/^\u2139\s*pass\s+(\d+)/m)
+  if (passed === null) return undefined
+  return {
+    passed: Number.parseInt(passed[1] ?? '0', 10) || 0,
+    failed: Number.parseInt(output.match(/^\u2139\s*fail\s+(\d+)/m)?.[1] ?? '0', 10) || 0,
+    skipped: Number.parseInt(output.match(/^\u2139\s*skipped\s+(\d+)/m)?.[1] ?? '0', 10) || 0,
+  }
+}
+
 function extractTestStats(output: string): Partial<TestSummary> {
+  const fromNodeTest = extractNodeTestStats(output)
+  if (fromNodeTest !== undefined) return fromNodeTest
+
   for (const pattern of TEST_RESULT_PATTERNS) {
     const match = output.match(pattern)
     if (!match) continue

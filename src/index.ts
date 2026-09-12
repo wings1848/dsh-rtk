@@ -10,6 +10,7 @@ import type { SystemPrompt } from '@deepseek-ai/dsh-system-prompt'
 
 import { Config, normalizeConfig, type RtkConfig } from './config.js'
 import { READ_COMPACTION_BANNER_PREFIX, compactToolResult } from './compact/index.js'
+import { parseBashResult, renderBashResult } from './compact/dsh-result.js'
 import { createMetricsTracker } from './metrics.js'
 import { createRtkCommand } from './command.js'
 import { resolveRtkExecutable, runExecutable } from './rtk-executable.js'
@@ -41,6 +42,15 @@ function rtkHistoryDbPath(): string {
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : undefined
 }
+
+/**
+ * Appended once per session when rtk cannot be found.
+ *
+ * A missing binary is the only failure that silently costs the user the whole
+ * feature, so it is worth one short line — but only one, and only for a
+ * session that has not been told yet.
+ */
+const MISSING_RTK_NOTICE = '[rtk] rtk not found; rewriting is off — /rtk verify shows install options'
 
 /** The guidance injected while lossy read compaction is active. */
 const SOURCE_FILTER_TROUBLESHOOTING_NOTE =
@@ -83,6 +93,10 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
   const metrics = createMetricsTracker()
   /** Rewrite decisions awaiting their result, keyed by call id, for `suggest` mode. */
   const pendingSuggestions = new Map<string, string>()
+  /** Call ids whose result should carry the one-time "rtk is missing" notice. */
+  const missingRtkCalls = new Set<string>()
+  /** Sessions already told that rtk is absent, so the notice is emitted once each. */
+  const notifiedAgents = new Set<string>()
 
   // The settings namespace is process-global, so only the first instance of
   // this plugin can own it. A host-plane row and a preset row both mounted, or
@@ -176,7 +190,15 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
     if (args === undefined || typeof args.command !== 'string') return next()
 
     await ensureRuntimeStatusFresh()
-    if (shouldSkipRewrite(config, runtimeStatus)) return next()
+    if (shouldSkipRewrite(config, runtimeStatus)) {
+      // The guard is standing the rewrite down because rtk is unavailable. Flag
+      // this result so post-execute can say so once per session.
+      if (config.notifyWhenRtkMissing) {
+        if (missingRtkCalls.size > 256) missingRtkCalls.clear()
+        missingRtkCalls.add(exec.callId)
+      }
+      return next()
+    }
 
     const decision = await resolveRtkRewrite(args.command, {
       runner: runExecutable,
@@ -224,7 +246,15 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
     if (args === undefined || typeof args.command !== 'string') return next()
 
     await ensureRuntimeStatusFresh()
-    if (shouldSkipRewrite(config, runtimeStatus)) return next()
+    if (shouldSkipRewrite(config, runtimeStatus)) {
+      // The guard is standing the rewrite down because rtk is unavailable. Flag
+      // this result so post-execute can say so once per session.
+      if (config.notifyWhenRtkMissing) {
+        if (missingRtkCalls.size > 256) missingRtkCalls.clear()
+        missingRtkCalls.add(exec.callId)
+      }
+      return next()
+    }
 
     const decision = await resolveRtkRewrite(args.command, {
       runner: runExecutable,
@@ -248,8 +278,17 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
 
   ctx.on('tools/post-execute', async (exec: ToolExecution, result: Readonly<ToolExecutionResult>, next: () => Promise<PostToolDecision>) => {
     const decision = await next()
-    const notice = pendingSuggestions.get(exec.callId)
+    let notice = pendingSuggestions.get(exec.callId)
     pendingSuggestions.delete(exec.callId)
+
+    if (missingRtkCalls.delete(exec.callId) && config.notifyWhenRtkMissing) {
+      const agentKey = exec.agent?.id
+      if (agentKey !== undefined && !notifiedAgents.has(agentKey)) {
+        if (notifiedAgents.size > 256) notifiedAgents.clear()
+        notifiedAgents.add(agentKey)
+        notice = MISSING_RTK_NOTICE
+      }
+    }
 
     if (decision.kind !== 'accept') return decision
     if (!config.enabled) return decision
@@ -314,15 +353,30 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
   }
 }
 
-/** Append a one-line notice to the last text block of a result. */
+/**
+ * Insert a one-line notice into a result, ahead of any trailing status markers.
+ *
+ * The markers must stay last. The harness parses the final line for the exit
+ * status — the model is told to check `[exit code: N]` on every call, and the
+ * Web UI derives its exit-status pill from the same line. Appending a notice
+ * after them would break both silently, which is exactly what an earlier
+ * version of this function did.
+ */
 function appendNotice(content: readonly ContentBlock[], notice: string): ContentBlock[] {
   const blocks: ContentBlock[] = [...content]
   for (let index = blocks.length - 1; index >= 0; index -= 1) {
     const block = blocks[index]
-    if (block !== undefined && block.type === 'text') {
+    if (block === undefined || block.type !== 'text') continue
+
+    const parts = parseBashResult(block.text)
+    if (parts.empty || parts.markers.length === 0) {
       blocks[index] = { type: 'text', text: `${block.text}\n${notice}` }
       return blocks
     }
+
+    const stdout = parts.stdout.length > 0 ? `${parts.stdout}\n${notice}` : notice
+    blocks[index] = { type: 'text', text: renderBashResult({ ...parts, stdout }) }
+    return blocks
   }
   return [...blocks, { type: 'text', text: notice }]
 }

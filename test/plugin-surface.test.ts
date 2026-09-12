@@ -153,6 +153,10 @@ describe('/rtk command', () => {
     const result = await failing.handler({ rawInput: 'verify' })
     assert.equal(result.kind, 'error')
     assert.match(String(result.text), /spawn rtk ENOENT/)
+    // A user who cannot run the tool needs the way out of that state.
+    assert.match(String(result.text), /brew install rtk/)
+    assert.match(String(result.text), /cargo install --git https:\/\/github\.com\/rtk-ai\/rtk/)
+    assert.match(String(result.text), /unrelated crate of the same name/, 'the crates.io name collision must be called out')
   })
 
   it('reports empty stats before anything was compacted', async () => {

@@ -52,6 +52,8 @@ export interface RtkConfig {
   mode: RtkMode
   guardWhenRtkMissing: boolean
   showRewriteNotifications: boolean
+  /** Whether a session is told once that rewriting is off because rtk is absent. */
+  notifyWhenRtkMissing: boolean
   /** Executable used for both `--version` probes and `rtk rewrite`. */
   rtkExecutable: string
   /** Deadline for one `rtk rewrite` call. */
@@ -71,6 +73,10 @@ export const DEFAULT_CONFIG: RtkConfig = {
   // sit in the model's context on every rewritten call. The saving is the
   // point of the plugin, and `/rtk stats` already reports what happened.
   showRewriteNotifications: false,
+  // On: a missing binary is the one condition that silently costs the user the
+  // whole feature. The notice is emitted once per session, so its cost is
+  // bounded even though it is on by default.
+  notifyWhenRtkMissing: true,
   rtkExecutable: 'rtk',
   rewriteTimeoutMs: 3000,
   compactedTools: ['bash', 'read', 'grep'],
@@ -122,6 +128,10 @@ export const Config = z.object({
     .boolean()
     .default(DEFAULT_CONFIG.showRewriteNotifications)
     .description('Record rewrite decisions so they are visible in the session log.'),
+  notifyWhenRtkMissing: z
+    .boolean()
+    .default(DEFAULT_CONFIG.notifyWhenRtkMissing)
+    .description('Tell each session once that command rewriting is off because rtk is not installed.'),
   rtkExecutable: z.string().default(DEFAULT_CONFIG.rtkExecutable).description('Executable name or path for rtk.'),
   rewriteTimeoutMs: z.natural().default(DEFAULT_CONFIG.rewriteTimeoutMs).description('Deadline in milliseconds for one `rtk rewrite` call.'),
   compactedTools: z
@@ -205,6 +215,7 @@ export function normalizeConfig(raw: unknown): RtkConfig {
     mode,
     guardWhenRtkMissing: pickBoolean(root.guardWhenRtkMissing, DEFAULT_CONFIG.guardWhenRtkMissing),
     showRewriteNotifications: pickBoolean(root.showRewriteNotifications, DEFAULT_CONFIG.showRewriteNotifications),
+    notifyWhenRtkMissing: pickBoolean(root.notifyWhenRtkMissing, DEFAULT_CONFIG.notifyWhenRtkMissing),
     rtkExecutable: pickString(root.rtkExecutable, DEFAULT_CONFIG.rtkExecutable),
     rewriteTimeoutMs: pickNumber(root.rewriteTimeoutMs, DEFAULT_CONFIG.rewriteTimeoutMs, 100, 60000),
     compactedTools: pickStringList(root.compactedTools, DEFAULT_CONFIG.compactedTools),

@@ -4,6 +4,9 @@ import { describe, it } from 'node:test'
 import { normalizeConfig } from '../lib/config.js'
 import { compactToolResult } from '../lib/compact/index.js'
 import { applyRtkHistoryScope } from '../lib/rtk-rewrite.js'
+import { filterBuildOutput } from '../lib/compact/build.js'
+import { compactGitOutput } from '../lib/compact/git.js'
+import { aggregateTestOutput } from '../lib/compact/test-output.js'
 import { apply } from '../lib/index.js'
 
 /**
@@ -165,5 +168,91 @@ describe('D3: shell-specific environment syntax', () => {
   it('leaves an ambient or explicit value alone in both shells', () => {
     assert.equal(applyRtkHistoryScope('rtk ls', '/tmp/x.db', '/custom.db', 'powershell'), 'rtk ls')
     assert.equal(applyRtkHistoryScope('$env:RTK_DB_PATH = "/mine.db"; rtk ls', '/tmp/x.db', undefined, 'powershell'), '$env:RTK_DB_PATH = "/mine.db"; rtk ls')
+  })
+})
+
+describe('D6: a failed build must never be reported as a success', () => {
+  it('recognizes tsc diagnostics instead of seeing an empty build log', () => {
+    // The shape `tsc` emits: `path(line,col): error TSxxxx: message`.
+    const output = [
+      "bad.ts(1,7): error TS2322: Type 'string' is not assignable to type 'number'.",
+      "bad.ts(2,7): error TS2322: Type 'number' is not assignable to type 'string'.",
+    ].join('\n')
+
+    const summary = filterBuildOutput(output, 'tsc --noEmit bad.ts')
+    assert.notEqual(summary, '[OK] Build successful (0 units compiled)', 'a failing build must not read as successful')
+    if (summary !== null) {
+      assert.match(summary, /2 error\(s\)/)
+      assert.match(summary, /TS2322/, 'the diagnostic code must survive')
+      assert.match(summary, /bad\.ts\(1,7\)/, 'the location must survive')
+    }
+  })
+
+  it('recognizes the `file:line:col: error` shape too', () => {
+    const output = 'src/a.ts:3:5: error: Unexpected token'
+    const summary = filterBuildOutput(output, 'make')
+    assert.notEqual(summary, '[OK] Build successful (0 units compiled)')
+    assert.match(String(summary), /Unexpected token/)
+  })
+
+  it('declines to summarize rather than inventing success out of unparsed output', () => {
+    // The compiler decided everything; this function cannot see an exit code,
+    // so "no diagnostics found" must mean "no opinion", never "success".
+    const opaque = 'something the parser does not understand\nand another line'
+    assert.equal(filterBuildOutput(opaque, 'cargo build'), null)
+  })
+
+  it('still reports a genuinely clean build', () => {
+    const clean = '   Compiling a\n   Compiling b\n    Finished dev'
+    assert.equal(filterBuildOutput(clean, 'cargo build'), '[OK] Build successful (2 units compiled)')
+  })
+})
+
+describe('D7: git status must be porcelain before it is summarized', () => {
+  it('refuses a body that only partly looks like porcelain', () => {
+    // One porcelain-looking line is enough to satisfy a loose line-anchored
+    // probe, and the summarizer then slices human text as if it were porcelain
+    // — inventing and dropping entries. The body must be consistently porcelain.
+    const mixed = [' M src/a.ts', '尚未暂存以备提交的变更：', '  （使用 "git add <文件>..." 更新要提交的内容）'].join('\n')
+    assert.equal(compactGitOutput(mixed, 'git status'), null)
+  })
+
+  it('still summarizes a real porcelain body', () => {
+    const porcelain = ['## main', ' M src/a.ts', ' M src/b.ts', '?? new.ts'].join('\n')
+    const summary = compactGitOutput(porcelain, 'git status')
+    assert.match(String(summary), /Branch: main/)
+    assert.match(String(summary), /Modified: 2 files/)
+  })
+})
+
+describe('D8: test summaries must read the runner counters and keep failure detail', () => {
+  /** Shape `node --test` emits, including the assertion block. */
+  const nodeTest = [
+    '\u2716 bad (0.8ms)',
+    '  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:',
+    '  2 !== 3',
+    '    at TestContext.<anonymous> (file:///tmp/fail.test.mjs:4:35)',
+    '\u2139 tests 2',
+    '\u2139 pass 1',
+    '\u2139 fail 1',
+  ].join('\n')
+
+  it('reads the `\u2139 pass N` / `\u2139 fail N` counters', () => {
+    const summary = aggregateTestOutput(nodeTest, 'node --test fail.test.mjs')
+    assert.match(String(summary), /PASS: 1 passed/, 'the pass count must come from the runner, not from marker scraping')
+    assert.match(String(summary), /FAIL: 1 failed/, 'the fail count must not count stack frames')
+  })
+
+  it('keeps the assertion detail so a reader learns why it failed', () => {
+    const summary = aggregateTestOutput(nodeTest, 'node --test fail.test.mjs')
+    assert.match(String(summary), /AssertionError/, 'the assertion must survive compaction')
+    assert.match(String(summary), /2 !== 3/, 'the compared values must survive compaction')
+  })
+
+  it('does not count stack frames as failures when scraping markers', () => {
+    // No runner counters at all: the fallback must not treat `at ...` as a failure.
+    const noCounters = ['\u2716 bad', '  Error: boom', '    at somewhere (file.js:1:1)'].join('\n')
+    const summary = aggregateTestOutput(noCounters, 'node --test x.mjs')
+    assert.match(String(summary), /FAIL: 1 failed/, 'one failure, not one per stack frame')
   })
 })

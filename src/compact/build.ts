@@ -38,7 +38,16 @@ const SKIP_PATTERNS = [
   /^\s*Running\s+/,
 ]
 
-const ERROR_START_PATTERNS = [/^error\[/, /^error:/, /^\[ERROR\]/, /^FAIL/]
+const ERROR_START_PATTERNS = [
+  /^error\[/,
+  /^error:/,
+  /^\[ERROR\]/,
+  /^FAIL/,
+  // `tsc` and friends: `path(line,col): error TSxxxx: message`.
+  /^[^\s:][^:]*(?:\(\d+[,:]\d+\)|:\d+:\d+):\s*(?:fatal\s+)?error\b/,
+  // The `path:line:col: error: message` shape used by many linters and compilers.
+  /^[^\s:][^:]*:\d+:\s*(?:fatal\s+)?error\b/,
+]
 const WARNING_PATTERNS = [/^warning:/, /^\[WARNING\]/, /^warn:/]
 const COMPILE_PROGRESS_PATTERN = /^\s*(Compiling|Checking|Building)\s+/
 
@@ -121,6 +130,12 @@ export function filterBuildOutput(output: string, command: string | undefined | 
   if (inErrorBlock && currentError.length > 0) stats.errors.push(currentError)
 
   if (stats.errors.length === 0 && stats.warnings.length === 0) {
+    // Success may only be claimed on positive evidence that the build ran and
+    // was clean. With no diagnostics AND no progress lines the parser simply
+    // did not understand the output — and it cannot see an exit code, so
+    // guessing "success" would replace a real compiler failure with a
+    // reassuring lie. Declining to summarize leaves the text intact.
+    if (stats.compiled === 0) return null
     return `[OK] Build successful (${stats.compiled} units compiled)`
   }
 

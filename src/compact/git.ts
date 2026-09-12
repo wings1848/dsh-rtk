@@ -4,6 +4,34 @@ const GIT_COMMAND_PATTERNS = [/^git\s+(diff|status|log|show|stash)\b/] as const
 const RAW_GIT_DIFF_PATTERN = /^diff --git /m
 const RAW_GIT_STATUS_PATTERN = /^(?:## |(?:M|A|D|R|C|U|\?| )\S)/m
 
+/**
+ * One line of `git status --porcelain` output.
+ *
+ * Covers the v1 branch header (`## main...origin/main`), the v2 headers
+ * (`# branch.head main`), the `??` untracked form, and the two-column status
+ * form. The human report contains none of these shapes.
+ */
+const PORCELAIN_STATUS_LINE = /^(?:##?\s|\?\? .+|[ MADRCU?!]{2} .+)/
+
+/** Share of non-blank lines that must parse as porcelain before summarizing. */
+const PORCELAIN_LINE_MIN_RATIO = 0.8
+
+/**
+ * Whether a body is `git status --porcelain` rather than the human report.
+ *
+ * The two are indistinguishable line by line — ` M path` is valid porcelain
+ * and also occurs inside the human report — but only porcelain may be sliced
+ * with fixed column offsets. Running the summarizer over the human text
+ * silently invents and drops entries, so the body must be *consistently*
+ * porcelain before any of it is interpreted.
+ */
+function isPorcelainStatus(output: string): boolean {
+  const lines = output.split('\n').filter((line) => line.trim().length > 0)
+  if (lines.length === 0) return false
+  const matches = lines.filter((line) => PORCELAIN_STATUS_LINE.test(line)).length
+  return matches / lines.length >= PORCELAIN_LINE_MIN_RATIO
+}
+
 /** Whether the command is one of the git commands this module understands. */
 export function isGitCommand(command: string | undefined | null): boolean {
   return matchesCommandPatterns(command, GIT_COMMAND_PATTERNS)
@@ -172,7 +200,10 @@ export function compactGitOutput(output: string, command: string | undefined | n
   if (!normalized) return null
 
   if (normalized.startsWith('git diff')) return RAW_GIT_DIFF_PATTERN.test(output) ? compactDiff(output) : null
-  if (normalized.startsWith('git status')) return RAW_GIT_STATUS_PATTERN.test(output) ? compactStatus(output) : null
+  if (normalized.startsWith('git status')) {
+    if (!isPorcelainStatus(output)) return null
+    return RAW_GIT_STATUS_PATTERN.test(output) ? compactStatus(output) : null
+  }
   if (normalized.startsWith('git log')) return compactLog(output)
   return null
 }

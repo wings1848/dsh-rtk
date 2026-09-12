@@ -18,13 +18,30 @@ export interface RtkCommandController {
 /** The command result shape the harness normalizes. */
 export type RtkCommandResult = { kind: 'success'; text?: string } | { kind: 'error'; text: string }
 
+/**
+ * Official install routes, taken from the project's own README.
+ *
+ * `cargo install rtk` is called out because crates.io carries an unrelated
+ * crate of the same name; only the `--git` form installs this tool.
+ */
+const INSTALL_HINT = [
+  'Install rtk with one of:',
+  '  brew install rtk                        # macOS / Linux (Homebrew, recommended)',
+  '  winget install rtk-ai.rtk               # Windows',
+  '  curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh',
+  '  cargo install --git https://github.com/rtk-ai/rtk',
+  '',
+  'Note: plain `cargo install rtk` installs an unrelated crate of the same name.',
+  'Releases: https://github.com/rtk-ai/rtk/releases',
+].join('\n')
+
 const HELP_TEXT = [
   'dsh-rtk — rewrite bash commands to rtk and compact tool output.',
   '',
   '  /rtk              show configuration and runtime status',
   '  /rtk show         same as /rtk',
   '  /rtk path         where the configuration is stored',
-  '  /rtk verify       check whether the rtk executable is usable',
+  '  /rtk verify       check whether the rtk executable is usable (prints install options when it is not)',
   '  /rtk stats        compaction savings for this session',
   '  /rtk clear-stats  reset the savings counters',
   '  /rtk reset        restore configuration defaults',
@@ -129,7 +146,10 @@ export function createRtkCommand(controller: RtkCommandController): {
             if (status.rtkExecutableResolutionWarning) parts.push(`note: ${status.rtkExecutableResolutionWarning}`)
             return { kind: 'success', text: parts.join('\n') }
           }
-          return { kind: 'error', text: `rtk is not usable: ${status.lastError ?? 'unknown error'}` }
+          return {
+            kind: 'error',
+            text: `rtk is not usable: ${status.lastError ?? 'unknown error'}\n\n${INSTALL_HINT}`,
+          }
         }
 
         case 'stats':

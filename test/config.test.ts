@@ -18,6 +18,9 @@ describe('normalizeConfig', () => {
     // Documented in both READMEs; the notice would otherwise sit in the
     // model's context on every rewritten call.
     assert.equal(config.showRewriteNotifications, false)
+    // On by default: a missing binary otherwise costs the user the whole
+    // feature without a word. Emitted once per session, so the cost is bounded.
+    assert.equal(config.notifyWhenRtkMissing, true)
   })
 
   it('keeps lossy read compaction off by default', () => {

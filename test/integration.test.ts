@@ -237,3 +237,61 @@ describe('apply() wiring', () => {
     assert.doesNotThrow(() => apply(harness.ctx, REWRITE_CONFIG as never))
   })
 })
+
+describe('missing-rtk notice', () => {
+  /** Drive one call through both stages, as the registry does. */
+  async function callOnce(harness: ReturnType<typeof fakeContext>, callId: string, agent: { id: string }) {
+    const exec = {
+      name: 'bash',
+      callId,
+      arguments: { command: 'git status' },
+      signal: new AbortController().signal,
+      agent,
+    }
+    await harness.emit('tools/execute', exec, async () => ({ isError: false, value: 'ok', content: [] }))
+    return harness.emit(
+      'tools/post-execute',
+      exec,
+      { isError: false, value: 'ok', content: [{ type: 'text', text: 'ok\n[exit code: 0]' }] },
+      async () => ({ kind: 'accept' }),
+    )
+  }
+
+  it('tells a session once, and only once, that rtk is missing', async () => {
+    const harness = fakeContext()
+    // A path that cannot exist, so the guard stands every rewrite down.
+    apply(harness.ctx, normalizeConfig({ rtkExecutable: '/nonexistent/rtk-binary' }) as never)
+    const agent = { id: 'session-notice' }
+
+    const first = await callOnce(harness, 'call-1', agent)
+    assert.equal(first.kind, 'accept')
+    const firstText = first.content.map((block: { text: string }) => block.text).join('\n')
+    assert.match(firstText, /rtk not found/, 'the first call must say rewriting is off')
+    assert.match(firstText, /\[exit code: 0\]$/, 'the notice must not disturb the exit marker')
+
+    const second = await callOnce(harness, 'call-2', agent)
+    const secondText = (second.content ?? []).map((block: { text: string }) => block.text).join('\n')
+    assert.doesNotMatch(secondText, /rtk not found/, 'the notice must not repeat within a session')
+  })
+
+  it('tells a different session its own first time', async () => {
+    const harness = fakeContext()
+    apply(harness.ctx, normalizeConfig({ rtkExecutable: '/nonexistent/rtk-binary' }) as never)
+
+    await callOnce(harness, 'call-a', { id: 'session-a' })
+    const other = await callOnce(harness, 'call-b', { id: 'session-b' })
+    const text = other.content.map((block: { text: string }) => block.text).join('\n')
+    assert.match(text, /rtk not found/, 'each session gets told independently')
+  })
+
+  it('stays quiet when the notice is switched off', async () => {
+    const harness = fakeContext()
+    apply(
+      harness.ctx,
+      normalizeConfig({ rtkExecutable: '/nonexistent/rtk-binary', notifyWhenRtkMissing: false }) as never,
+    )
+    const decision = await callOnce(harness, 'call-1', { id: 'session-quiet' })
+    const text = (decision.content ?? []).map((block: { text: string }) => block.text).join('\n')
+    assert.doesNotMatch(text, /rtk not found/)
+  })
+})
