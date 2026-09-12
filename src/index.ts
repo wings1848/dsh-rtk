@@ -106,7 +106,13 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
   // settings event instead.
   const settings = ctx.get('settings') as SettingsProvider | undefined
   let ownedScope: SettingsScope<unknown> | undefined
-  if (settings !== undefined) {
+  // Surfaced by `/rtk show`. A silently swallowed registration failure hides
+  // the only runtime-editable configuration path this plugin has, and the
+  // failure mode (settings edits simply do nothing) is invisible otherwise.
+  let settingsNote: string
+  if (settings === undefined) {
+    settingsNote = 'settings service unavailable — configuration comes from the composition only'
+  } else {
     try {
       const scope = settings.register('dsh-rtk', Config, { base: rawConfig })
       ownedScope = scope as unknown as SettingsScope<unknown>
@@ -115,7 +121,9 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
         config = normalizeConfig(next)
         applySourceFilterNote()
       })
-    } catch {
+      settingsNote = 'the `dsh-rtk` namespace in the harness settings document'
+    } catch (error) {
+      settingsNote = `settings namespace unavailable (${error instanceof Error ? error.message : String(error)}) — configuration comes from the composition only`
       const existing = settings.get('dsh-rtk')
       if (existing !== undefined) config = normalizeConfig(existing)
       ctx.on('settings/updated', (ns: string, next: unknown) => {
@@ -335,7 +343,6 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
 
   const commands = ctx.get('commands') as CommandRuntime | undefined
   if (commands !== undefined) {
-    const location = settings === undefined ? 'composition config (settings service unavailable)' : 'the `dsh-rtk` namespace in the harness settings document'
     const command = createRtkCommand({
       getConfig: () => config,
       resetConfig: async () => {
@@ -347,7 +354,7 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
       refreshRuntimeStatus,
       getMetrics: () => metrics.summary(),
       clearMetrics: () => metrics.clear(),
-      configLocation: () => location,
+      configLocation: () => settingsNote,
     })
     ctx.effect(() => commands.register(command), 'dsh-rtk.command')
   }
