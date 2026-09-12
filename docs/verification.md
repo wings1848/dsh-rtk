@@ -39,10 +39,10 @@
 | 2 | 构建产出 `lib/` | `tsc -p tsconfig.json && ls lib/index.js` | 文件存在 | PASS |
 | 3 | 全部测试通过 | `node --run test`（先构建再测） | `pass 92 / fail 0` | PASS |
 | 4 | 模块导出符合 cordis 插件约定 | `node -e "import('./lib/index.js').then(m=>console.log(Object.keys(m)))"` | `Config, apply, inject, name`（与 `dsh-tool-bash` 同约定） | PASS |
-| 5 | 从 preset 目录可解析裸模块名 | `cd ~/.dsh/.agent-presets/rtk && node -e "import('dsh-rtk')"` | 解析成功，`name=rtk`、`inject=['tools']` | PASS |
-| 6 | preset 能被真实组合引擎挂载 | 动态插件调用 `agentPresets.standingKeyFor('rtk')` | `MOUNT OK` | PASS |
-| 7 | host patch 语法正确并被组合 | `dsh --profile web --dump-config \| grep -A3 "id: rtk"` | 组合树中出现 `- id: rtk / name: dsh-rtk` | PASS（该方案随后按第 5 节回滚） |
-| 8 | bash 真被改写（端到端） | 在**新建**的、preset 选 `rtk` 的会话中运行 `ls -la` | 输出为 rtk 紧凑格式 | **待新会话确认**——同会话内切换被 harness 拒绝，见第 6 节 |
+| 5 | 模块能被宿主解析 | `~/.dsh/node_modules/dsh-rtk` 软链存在；插件**实际生效**（见第 6 节） | 组合与加载均成功 | PASS |
+| 6 | preset 方案当初能被真实组合引擎挂载 | 动态插件调用 `agentPresets.standingKeyFor('rtk')` | `MOUNT OK`（修复前、修复后各一次） | PASS（该平面最终被 host 取代，见第 5 节） |
+| 7 | host patch 语法正确并被组合 | `dsh --profile web --dump-config \| grep -A3 "id: rtk"` | 组合树中出现 `- id: rtk / name: dsh-rtk` | PASS（**最终采用**） |
+| 8 | bash 真被改写（端到端） | host 平面重启后运行 `ls -la <dir>`（**不带管道**） | 输出为 rtk 紧凑格式 | **PASS**——见第 6 节 |
 
 ---
 
@@ -119,7 +119,9 @@
 1. **`settings` 命名空间是进程级全局的** —— host 行与 preset 行不能同时存在。插件内已改为 `try/catch` 降级：注册失败的实例改为通过 `settings/updated` 事件跟随已注册的实例，**配置便利性绝不能让整个 preset 挂载失败**。
 2. **`tool-cordis` 注册进程级 Cordis inspect provider** —— `cordis` preset 的副本会与正在运行的 `cordis` 会话冲突。已从 `rtk` preset 副本中移除该行，并留注释说明需要自我修改时切回 `cordis` preset。
 
-处置：**回滚 host patch，只保留 preset 方案**。理由：preset 是架构上正确的平面（agent 行为属于单个会话），而且新建会话即生效、无需重启宿主。回滚后重新 mount，结果：
+**最终处置（用户决定）：采用 host 平面。** 用户希望「装上就一直生效」，与 `pi-rtk-optimizer` 作为全局扩展的体验一致；preset 方案需要每次新建会话手动选择。于是重新写入 host patch，并删除已被取代的 `rtk` preset 目录。
+
+中间为排查冲突曾回滚过一次 host patch，回滚后重新 mount preset 得到：
 
 ```
 [rtk-diag] rtkNamespaceRegistered=false namespaces=[...] MOUNT OK; key=[object Object]
@@ -129,32 +131,76 @@
 
 ---
 
-## 6. 端到端验证（在同一会话内无法完成，附证据）
+## 6. 端到端验证（PASS）
 
-曾尝试把**正在运行的会话**重挂到 `rtk` preset，以便在进程内取到端到端证据。`agentPresets.select` 明确拒绝：
+**最终形态：host 平面。** 插件行写在 `~/.dsh/cordis.patch.yml`，模块经 `~/.dsh/node_modules/dsh-rtk` 软链解析，宿主重启后对**所有会话**生效。
+
+### 6.1 配置被正确组合
 
 ```
-[rtk-switch] SELECT FAIL: session "session-44856891-97cb-44d9-a8ab-ea4691871430" has already started; its agent preset is fixed
+$ dsh --profile web --dump-config | grep -A5 "^- id: rtk"
+647:- id: rtk
+648-  name: dsh-rtk
+649-  config:
+650-    enabled: true
+651-    mode: rewrite
 ```
 
-**preset 在会话创建时锁定**，这是 harness 的设计约束，不是实现缺陷。`SubagentStartRequest` 也没有 preset 覆盖字段（只有 `label`/`prompt`/`parent`/`signal`/`agentOptions`），所以 subagent 同样继承父会话的 preset，无法用来验证。
+### 6.2 命令确实被改写（决定性证据）
 
-因此第 8 项只能由**新建会话**完成。可复现步骤：
+重启宿主后，模型发出 `ls -la /home/wings/.agents/`（**不带管道**），实际返回：
 
-1. 在 Web GUI 新建一个会话，preset 选 `rtk`（磁盘上已就绪：`~/.dsh/.agent-presets/rtk/agent.cordis.yml`）。
-2. 运行 `ls -la`。若 dsh-rtk 生效，实际执行的是 `rtk ls -la`，输出为 rtk 的紧凑格式（无权限位/owner/日期列）。
-3. 运行 `/rtk verify` 应报告 rtk 可用；运行 `/rtk stats` 应报告本次会话的压缩收益。
-4. 对照：在同一会话里运行 `echo hi`（rtk 无等价命令）应原样执行。
+```
+755  .git/
+755  skills/
+644  .gitignore  796B
+644  .skill-lock.json  15.6K
+644  AGENTS.md  5.2K
+600  doctor.py  9.1K
+```
 
-**已就位的前置证据**：`rtk` preset 已通过真实组合引擎的 mount 验证（`MOUNT OK`），模块名从 preset 目录可解析，且 `apply()` 的全部接线与真实 rtk 二进制的交互已由 92 项测试覆盖。
+这是 rtk 的 token-optimized 格式——权限位折叠成八进制、无 owner/日期列、目录在前、大小带单位。同一目录的原生格式是：
 
----
+```
+$ /bin/ls -la /home/wings/.agents/ | head -3
+-rw-r--r-- 1 wings wings  796  .gitignore
+```
+
+两者逐列不同，改写生效无疑。
+
+### 6.3 三条对照实验的解读
+
+| 命令 | 结果 |
+|---|---|
+| `ls -la <dir>`（无管道） | rtk 格式 → **被改写** |
+| `rtk ls -la <dir>`（已带 rtk） | rtk 格式 → 被跳过改写，但结果相同 |
+| `/bin/ls -la <dir>` | 原生格式 → 未被改写（rtk 不认绝对路径形式） |
+
+### 6.4 一个必须知道的行为：带管道的命令不会被改写
+
+```
+$ rtk rewrite "ls -la /tmp"            → exit 3   rtk ls -la /tmp
+$ rtk rewrite "ls -la /tmp | head -5"  → exit 1   （无输出）
+```
+
+**rtk 对含管道的命令保守跳过改写**——这是 rtk 自身的支持策略，插件忠实转发。排查期间一度误判为缺陷，实为测试命令自带了 `| head`，绕过了改写。用户若想让某条命令走 rtk，去掉管道（或用 `rtk …` 显式调用）。
+
+### 6.5 另一条被 harness 拒绝的路径（留档）
+
+曾尝试把**正在运行的会话**重挂到 preset 以取得进程内证据，`agentPresets.select` 明确拒绝：
+
+```
+[rtk-switch] SELECT FAIL: session "session-44856891-…" has already started; its agent preset is fixed
+```
+
+**preset 在会话创建时锁定**，这是 harness 的设计约束。`SubagentStartRequest` 也没有 preset 覆盖字段（只有 `label`/`prompt`/`parent`/`signal`/`agentOptions`），所以 subagent 同样继承父会话 preset、无法用于验证。这也是最终选择 host 平面的原因之一：host 层是进程级的，重启即对**包括当前会话在内**的所有会话生效。
 
 ## 7. 已知限制
 
 - **流式 bash 输出未清洗。** Pi 有 `tool_execution_start/update/end` 钩子可以边流边清洗；harness 没有对应事件，故未移植。
 - **Windows 兼容修正与 hashline 锚点保护的 read 处理未移植。** 目标部署是 POSIX，且 harness 的 `read` 输出格式与 Pi 不同（read 压缩默认关闭，影响面为零）。
 - **`/rtk` 没有交互式设置面板。** harness 的 TUI 设置面板是 client 侧能力；配置改由 `dsh-rtk` settings 命名空间承载，可用 `/rtk show` 查看、在设置文档中修改。
+- **含管道的命令不会被改写。** `rtk rewrite` 对 `cmd | other` 返回 exit 1（不支持），插件随之原样执行。这不是缺陷，是 rtk 的支持策略；但意味着 `ls | head` 这类常见写法享受不到优化。
 - **`pwsh` 的环境前缀已按 PowerShell 方言分派**（`$env:NAME = '…'`，不是 POSIX 的 `export`）；修复前 Windows 上每次被改写的 pwsh 调用都会语法错误。**本机无 pwsh，该项仅由单元测试覆盖，未真机执行。**
 - **验收第 8 项依赖一个真实会话。** 前 7 项都能在进程外复现；第 8 项需要新建一个使用 `rtk` preset 的会话。
 
