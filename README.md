@@ -150,6 +150,12 @@ Both listeners register in the scope the row was mounted into. A preset row ther
 
 Only the `tools` service is a hard dependency. `settings`, `commands`, and `systemPrompt` are resolved with `ctx.get`, so a composition that omits any of them still gets the optimization.
 
+### Caveat: the rewriting seam is not a sanctioned extension point
+
+The harness documents `tools/execute` wrappers as wrappers that "may change only `exec.signal`". Replacing `arguments` is **not a supported extension point** — it works because the execution object is not frozen until its result is notified, and the failed alternative is worse: `tools/pre-execute` deliberately may not rewrite input (arguments are logged and presented before dispatch), and a tool cannot be re-registered over one in the same layer.
+
+`dsh-rtk` takes that seam knowingly, and pays for it where it can: the replacement is scoped to a single call and restored in `finally`, and every failure path falls back to the command the model sent. If a future harness version freezes the execution object earlier, rewriting goes quiet rather than breaking — commands run unrewritten and compaction is unaffected, because `tools/post-execute` *is* a documented content-replacement stage.
+
 ## Differences from pi-rtk-optimizer
 
 | pi-rtk-optimizer | dsh-rtk |

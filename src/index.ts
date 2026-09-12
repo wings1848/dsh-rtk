@@ -13,7 +13,7 @@ import { READ_COMPACTION_BANNER_PREFIX, compactToolResult } from './compact/inde
 import { createMetricsTracker } from './metrics.js'
 import { createRtkCommand } from './command.js'
 import { resolveRtkExecutable, runExecutable } from './rtk-executable.js'
-import { applyRtkHistoryScope, resolveRtkRewrite } from './rtk-rewrite.js'
+import { applyRtkHistoryScope, resolveRtkRewrite, type ShellKind } from './rtk-rewrite.js'
 import { isStatusStale, shouldRequireRtkAvailability, shouldSkipRewrite, type RtkRuntimeStatus } from './runtime-guard.js'
 
 /** Cordis plugin name used by loader diagnostics. */
@@ -186,7 +186,9 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
     })
     if (!decision.changed) return next()
 
-    const command = applyRtkHistoryScope(decision.rewrittenCommand, rtkHistoryDbPath(), process.env.RTK_DB_PATH)
+    // `pwsh` is a rewrite target too, and PowerShell has no `export`.
+    const shell: ShellKind = exec.name === 'pwsh' ? 'powershell' : 'posix'
+    const command = applyRtkHistoryScope(decision.rewrittenCommand, rtkHistoryDbPath(), process.env.RTK_DB_PATH, shell)
     if (config.showRewriteNotifications) {
       // A cancelled call can be finalized on the `final-result` path, which
       // bypasses post-execute and would leave its entry behind. The map is
@@ -230,8 +232,16 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
       timeoutMs: config.rewriteTimeoutMs,
       signal: exec.signal,
     })
-    if (decision.changed) pendingSuggestions.set(exec.callId, `[rtk] suggestion: ${decision.rewrittenCommand}`)
-    return next()
+    if (decision.changed) {
+      if (pendingSuggestions.size > 256) pendingSuggestions.clear()
+      pendingSuggestions.set(exec.callId, `[rtk] suggestion: ${decision.rewrittenCommand}`)
+    }
+    try {
+      return await next()
+    } catch (error) {
+      pendingSuggestions.delete(exec.callId)
+      throw error
+    }
   })
 
   // ── output compaction ────────────────────────────────────────────────────
@@ -266,10 +276,20 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
       return notice === undefined ? decision : { kind: 'accept', content: appendNotice(source, notice) }
     }
 
+    // A sibling listener may have attached contexts for the next request.
+    // Rebuilding the decision without them would drop them silently, and the
+    // shipped search tool does exactly that when a result was capped.
+    const contexts = decision.additionalContexts
+    const rebuild = (blocks: ContentBlock[]): PostToolDecision => ({
+      kind: 'accept',
+      content: blocks,
+      ...(contexts === undefined ? {} : { additionalContexts: contexts }),
+    })
+
     if (notice === undefined) {
-      return content === source ? decision : { kind: 'accept', content: [...content] }
+      return content === source ? decision : rebuild([...content])
     }
-    return { kind: 'accept', content: appendNotice(content, notice) }
+    return rebuild(appendNotice(content, notice))
   })
 
   // ── the /rtk command ─────────────────────────────────────────────────────

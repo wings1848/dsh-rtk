@@ -79,9 +79,20 @@ export function isAlreadyRtkCommand(command: string): boolean {
 
 const RTK_HISTORY_ENV = 'RTK_DB_PATH'
 
+/** Which shell dialect an assignment prefix must be written in. */
+export type ShellKind = 'posix' | 'powershell'
+
+/// Matches a PowerShell environment assignment already present at the head.
+const PWSH_ASSIGNMENT = /^\$env:RTK_DB_PATH\s*=/
+
 /**
  * Prefix a command with an isolated `RTK_DB_PATH` so rtk's usage history lands
  * in a scratch directory instead of the working tree.
+ *
+ * The two shells need different syntax: `export NAME='value'` is a syntax error
+ * in PowerShell, which spells the same thing `$env:NAME = 'value'`. Both the
+ * harness's `pwsh` tool and its `bash` tool are rewrite targets, so the caller
+ * passes the dialect rather than assuming one.
  *
  * The assignment is skipped when the command already sets it or the ambient
  * environment provides one, so an explicit choice is never overridden.
@@ -89,12 +100,26 @@ const RTK_HISTORY_ENV = 'RTK_DB_PATH'
  * @param command - the rewritten command.
  * @param historyDbPath - absolute path for this deployment's rtk history database.
  * @param ambientValue - value currently in the environment, if any.
+ * @param shell - the dialect of the command being prefixed.
  * @returns the command to run, prefixed only when isolation applies.
  */
-export function applyRtkHistoryScope(command: string, historyDbPath: string, ambientValue: string | undefined): string {
+export function applyRtkHistoryScope(
+  command: string,
+  historyDbPath: string,
+  ambientValue: string | undefined,
+  shell: ShellKind = 'posix',
+): string {
   if (!command.trim() || !historyDbPath.trim()) return command
   if (ambientValue !== undefined && ambientValue.trim()) return command
+
   const trimmed = command.trimStart()
+
+  if (shell === 'powershell') {
+    if (PWSH_ASSIGNMENT.test(trimmed)) return command
+    // PowerShell escapes a literal quote by doubling it.
+    return `$env:${RTK_HISTORY_ENV} = '${historyDbPath.replace(/'/g, "''")}'; ${command}`
+  }
+
   if (splitLeadingEnvAssignments(trimmed).envPrefix.includes(`${RTK_HISTORY_ENV}=`)) return command
   return `export ${RTK_HISTORY_ENV}='${historyDbPath.replace(/'/g, "'\\''")}'; ${command}`
 }

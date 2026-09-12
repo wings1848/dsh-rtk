@@ -37,7 +37,7 @@
 |---|---|---|---|---|
 | 1 | 类型检查通过（用真实 harness 类型） | `tsc -p tsconfig.json --noEmit` | 无输出、exit 0 | PASS |
 | 2 | 构建产出 `lib/` | `tsc -p tsconfig.json && ls lib/index.js` | 文件存在 | PASS |
-| 3 | 全部测试通过 | `node --test test/*.test.ts` | `pass 84 / fail 0` | PASS |
+| 3 | 全部测试通过 | `node --run test`（先构建再测） | `pass 92 / fail 0` | PASS |
 | 4 | 模块导出符合 cordis 插件约定 | `node -e "import('./lib/index.js').then(m=>console.log(Object.keys(m)))"` | `Config, apply, inject, name`（与 `dsh-tool-bash` 同约定） | PASS |
 | 5 | 从 preset 目录可解析裸模块名 | `cd ~/.dsh/.agent-presets/rtk && node -e "import('dsh-rtk')"` | 解析成功，`name=rtk`、`inject=['tools']` | PASS |
 | 6 | preset 能被真实组合引擎挂载 | 动态插件调用 `agentPresets.standingKeyFor('rtk')` | `MOUNT OK` | PASS |
@@ -85,7 +85,7 @@
 
 恢复后复测：`tests 50 / pass 50 / fail 0`。
 
-> 两次验红都在 `test/compact.test.ts` 上做，因为这两条正是默认开启路径上的不变量。验红当时套件为 50 项；补入 `integration.test.ts`（`apply()` 接线 + 真实 rtk 二进制）与 `plugin-surface.test.ts`（可执行解析、运行时守卫、统计、`/rtk` 全部子命令）后总数为 84。
+> 两次验红都在 `test/compact.test.ts` 上做，因为这两条正是默认开启路径上的不变量。验红当时套件为 50 项；补入 `integration.test.ts`（`apply()` 接线 + 真实 rtk 二进制）与 `plugin-surface.test.ts`（可执行解析、运行时守卫、统计、`/rtk` 全部子命令）后为 84；独立复核后又补入 `regressions.test.ts` 的 8 项，现为 92。**注**：这些注入验红改的是 `lib/`（测试的目标是构建产物），`src/` 的同类改动不重新构建就测不出来——这一点由复核者指出（第 8 节 D4）并已修复。
 
 ---
 
@@ -94,7 +94,7 @@
 | 不变量 | 类型 | 实测值 |
 |---|---|---|
 | `bash` 结果的状态标记在压缩后原样保留 | 测试 | `[exit code: N]`、`[stderr]`、`[timed out after …]`、`[sandbox: …]`、截断提示，均有断言覆盖 |
-| 压缩结果永不大于原文 | 测试 | 每条技术路径都走 `rendered.length >= text.length` 守卫；命门用例见验红 #2 |
+| 压缩结果永不大于原文 | 测试 | 每条技术路径都走「不短于原文就放弃」守卫；命门用例见验红 #2。**此条曾被违反**：`read` + 源码过滤路径的守卫未把 banner 计入长度，实测 +31 字符。已修复并新增回归用例，见第 8 节 D1 |
 | 压缩失败不影响工具调用 | 测试 | `never breaks a tool call when compaction throws`：content 非数组时按原样 accept |
 | 改写只作用于单次调用，随后恢复原参数 | 测试 | `rewrites a supported command and restores the original afterwards` 断言派发后 `exec.arguments.command === 'git status'` |
 | rtk 不可用时命令原样执行 | 测试 | `degrades to the original command when rtk cannot be resolved`（指向不存在的二进制） |
@@ -146,7 +146,7 @@
 3. 运行 `/rtk verify` 应报告 rtk 可用；运行 `/rtk stats` 应报告本次会话的压缩收益。
 4. 对照：在同一会话里运行 `echo hi`（rtk 无等价命令）应原样执行。
 
-**已就位的前置证据**：`rtk` preset 已通过真实组合引擎的 mount 验证（`MOUNT OK`），模块名从 preset 目录可解析，且 `apply()` 的全部接线与真实 rtk 二进制的交互已由 84 项测试覆盖。
+**已就位的前置证据**：`rtk` preset 已通过真实组合引擎的 mount 验证（`MOUNT OK`），模块名从 preset 目录可解析，且 `apply()` 的全部接线与真实 rtk 二进制的交互已由 92 项测试覆盖。
 
 ---
 
@@ -155,4 +155,36 @@
 - **流式 bash 输出未清洗。** Pi 有 `tool_execution_start/update/end` 钩子可以边流边清洗；harness 没有对应事件，故未移植。
 - **Windows 兼容修正与 hashline 锚点保护的 read 处理未移植。** 目标部署是 POSIX，且 harness 的 `read` 输出格式与 Pi 不同（read 压缩默认关闭，影响面为零）。
 - **`/rtk` 没有交互式设置面板。** harness 的 TUI 设置面板是 client 侧能力；配置改由 `dsh-rtk` settings 命名空间承载，可用 `/rtk show` 查看、在设置文档中修改。
+- **`pwsh` 的环境前缀已按 PowerShell 方言分派**（`$env:NAME = '…'`，不是 POSIX 的 `export`）；修复前 Windows 上每次被改写的 pwsh 调用都会语法错误。**本机无 pwsh，该项仅由单元测试覆盖，未真机执行。**
 - **验收第 8 项依赖一个真实会话。** 前 7 项都能在进程外复现；第 8 项需要新建一个使用 `rtk` preset 的会话。
+
+---
+
+## 8. 独立复核（subagent）与修复
+
+由另一个 agent 独立复核（不共享本对话上下文）：自行跑测试、读 harness 源码核实接口断言、做注入验红、与 pi 版逐文件对照。裁决为「核心结论**部分成立**」，共找出 5 处真实缺陷。
+
+**全部已修**，且每一条都**先由我独立复现再修**——不是直接采信复核者的描述：
+
+| 编号 | 级别 | 缺陷 | 我的复现 | 修复 |
+|---|---|---|---|---|
+| D1 | 高 | `compactReadText` 的「永不增大」守卫在拼 banner **之前**执行，`read` + 源码过滤路径实测 `1487 → 1518`（+31 字符）且 `changed=true` | `test/regressions.test.ts` 的 banner 用例，修前失败 | banner 计入长度比较 |
+| D2 | 中高 | post-execute 重建 decision 时吞掉内层 listener 的 `additionalContexts`；shipped 的 `dsh-tool-fs-search` 在结果被截断时正是这样返回 | `preserves contexts attached by an inner listener`，修前失败 | 重建时透传 `additionalContexts` |
+| D3 | 中 | `pwsh` 也是改写目标，却统一加 POSIX 前缀 `export …` → Windows 上语法错误 | 三个 PowerShell 语法用例，修前失败 | `applyRtkHistoryScope` 增加 shell 方言参数，按工具分派 |
+| D4 | 中 | 全部测试只 import `lib/`，改 `src/` 不构建就测不出行为回归；`check` 顺序又是「先测后构建」 | 复核者实测：只改 `src` → 84/84 全绿；改 `lib` 同一处 → 83/1 | `test` script 改为先 `build` 再测 |
+| D5 | 低 | `suggest` 分支的 `pendingSuggestions` 在 `next()` 抛错时不清理 | 代码审读 | 加 `try/catch` 清理 |
+
+修复后复跑：`ℹ tests 92 / pass 92 / fail 0`。
+
+### 复核对本报告的两处纠正（已落进文档）
+
+1. **「唯一接缝」的说法不完整。** 本报告此前只写「`tools/execute` 是唯一能改写命令的接缝」，**没有披露**官方 JSDoc 明确限定 wrapper「may change only `exec.signal`」。复核实测确认：改写能生效，只是因为执行对象直到 `notifyResult` 才被冻结——属于**未被支持的用法**，前向兼容无保证。这一披露现已写进 `README.md` 与 `README.zh.md` 的「注意」小节。
+2. **「压缩结果永不大于原文」曾不成立**（D1）。本报告此前把它列为无条件不变量，属于**夸大**；现已改为带修复历史的准确表述。
+
+### 复核确认成立的部分
+
+改写确实只能经 `tools/execute`（复核者用真实 `ToolRuntime` + 3 路并发实测）、退出码标记在 bash 路径确实保住、rtk 缺失时正确退化、参数在 `finally` 中恢复、并行调用无串扰、`lib` 与 `src` 除 `.map` 外一致。
+
+### 仍未覆盖
+
+pwsh 真机执行、grep 超限时的真实会话 e2e、`/rtk` 命令面与 settings 命名空间冲突路径、`test-output`/`linter`/`search` 与 pi 版的逐行对照。

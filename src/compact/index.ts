@@ -192,12 +192,15 @@ function compactReadText(
   }
 
   if (state.techniques.length === 0) return { text, techniques: [] }
-  if (state.text.length >= text.length) return { text, techniques: [] }
 
-  // The banner is what tells a later reader that an edit mismatch may be the
-  // compactor's fault rather than the file's.
+  // The banner is part of the returned result, so the size guard must weigh it.
+  // Filtering one comment line out of a short file saves less than the banner
+  // costs, and without this the result would come back longer than the text it
+  // replaced — the exact invariant the guard exists to hold.
   const banner = `${READ_COMPACTION_BANNER_PREFIX} ${state.techniques.join(', ')}]`
-  return { text: `${banner}\n${state.text}`, techniques: state.techniques }
+  const rendered = `${banner}\n${state.text}`
+  if (rendered.length >= text.length) return { text, techniques: [] }
+  return { text: rendered, techniques: state.techniques }
 }
 
 function compactGrepText(text: string, compaction: OutputCompactionConfig): TextTransform {

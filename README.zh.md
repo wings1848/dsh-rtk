@@ -151,6 +151,12 @@ agentPresets.copy('standard', 'rtk', 'RTK 优化')
 
 硬依赖只有 `tools` 服务。`settings`、`commands`、`systemPrompt` 都用 `ctx.get` 解析，缺少其中任何一个的组合仍然能获得优化。
 
+### 注意：改写所用的接缝不是官方扩展点
+
+harness 对 `tools/execute` wrapper 的文档原话是「may change only `exec.signal`」。替换 `arguments` **不是受支持的扩展点**——它能生效，只是因为执行对象要等到结果被通知时才被冻结。而失败的替代方案更糟：`tools/pre-execute` 被刻意设计为不能重写输入（参数在派发前就已记入日志并呈现），同一 layer 内也无法用新工具覆盖已有工具。
+
+`dsh-rtk` 是**知情地**用了这条接缝，并在力所能及处做了对冲：替换只作用于单次调用、在 `finally` 里恢复，任何失败路径都退回模型发出的原命令。若未来的 harness 提前冻结执行对象，改写会**静默失效**而不是报错——命令按原样执行，压缩不受影响，因为 `tools/post-execute` 是**有文档记载的内容替换阶段**。
+
 ## 与 pi-rtk-optimizer 的差异
 
 | pi-rtk-optimizer | dsh-rtk |

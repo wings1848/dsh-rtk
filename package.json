@@ -48,8 +48,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test test/*.test.ts",
-    "check": "node --run typecheck && node --run test && node --run build",
+    "test": "node --run build && node --test test/*.test.ts",
+    "check": "node --run typecheck && node --run test",
     "prepack": "node --run build"
   },
   "peerDependencies": {
