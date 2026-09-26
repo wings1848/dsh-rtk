@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.1.1
+
+### Harness compatibility
+
+- Runs on both dsh 0.1.5 and dsh 0.1.7. The 0.1.7 release replaced the settings
+  provider (`SettingsProvider` / `register` / `settings/updated`) with
+  `SettingsForms` plus live config references updated in place; the settings
+  integration now sits behind one bridge that detects which generation it is
+  talking to ([`src/settings-compat.ts`](src/settings-compat.ts)), and imports
+  no runtime type from `@deepseek-ai/dsh-settings` — that package is exactly
+  the one that changed, so structural typing is what keeps the next change
+  cheap.
+- Fixed a hard failure on 0.1.7: the old fallback path called `settings.get()`,
+  which the new service does not have, so `apply()` threw
+  `TypeError: settings.get is not a function` and took the whole plugin down —
+  rewriting, compaction, and `/rtk` together. An unrecognized settings surface
+  now costs the live-editing integration only: the plugin degrades to
+  composition-only configuration.
+- Configuration fields are marked live-editable where the host's schemastery
+  supports it, so on 0.1.7 the settings page is generated from the plugin's own
+  schema. Note the namespace there is the composition row's id (`rtk` in the
+  README's example), not the plugin's old hardcoded `dsh-rtk`.
+- `/rtk reset` now reports what it actually did; with no writable settings
+  layer it says so instead of claiming a reset that never happened.
+- Peer ranges cover both generations (`^0.1.5-rc.1 || ^0.1.7-rc.2`). A
+  prerelease range only matches its own `[major,minor,patch]` tuple, so each
+  new harness rc train needs a one-line range bump here.
+- Verified end-to-end in an isolated harness home against a real 0.1.7 host
+  (six headless runs, evidence in
+  [`docs/verification.md`](docs/verification.md) §11.6): rewriting, the quiet
+  default, compaction's spill coordination, the `/rtk` command, and the modern
+  settings entry all behave. One deployment caveat that surfaced there: a row
+  in the home patch (`~/.dsh/cordis.patch.yml`) is settings-**read-only** on
+  0.1.7 — the service refuses writes a lower layer would override, and
+  `/rtk reset` reports the refusal. Profile-layer rows stay live-editable.
+
 ## 0.1.0
 
 Initial release — a port of `pi-rtk-optimizer` to the DeepSeek Harness plugin

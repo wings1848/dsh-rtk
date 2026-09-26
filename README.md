@@ -99,7 +99,7 @@ To try it without touching an existing preset, copy one and add the row:
 agentPresets.copy('standard', 'rtk', 'RTK 优化')
 ```
 
-The row works at the host plane too (add it to `~/.dsh/cordis.patch.yml` instead), which covers every session in the deployment — but that needs a host restart, and a host row plus a preset row would both want the same process-global settings namespace. Pick one plane.
+The row works at the host plane too (add it to `~/.dsh/cordis.patch.yml` instead), which covers every session in the deployment — but that needs a host restart, and on dsh 0.1.5 a host row plus a preset row would both want the same process-global `dsh-rtk` settings namespace (0.1.7 keys settings by row id, so the clash is gone there). Pick one plane.
 
 ## Configuration
 
@@ -139,7 +139,9 @@ Every field is optional; defaults are shown.
         maxChars: 12000              # 1000–200000
 ```
 
-The configuration is also registered as the `dsh-rtk` namespace in the harness settings document, so it can be edited there and takes effect without a restart. A composition `config:` block supplies the `base` layer; the settings document supplies the user layer on top.
+The configuration is also editable live in the harness settings document, and takes effect without a restart. Where it appears depends on the harness generation: on dsh 0.1.7+ the row shows up as its own settings entry, named after the composition row's id (the example above: `rtk`), with every field editable; on dsh 0.1.5 it is the `dsh-rtk` namespace. Either way a composition `config:` block supplies the base layer and the settings document supplies the user layer on top — `/rtk path` reports which one this plugin can see. A settings service of an unknown generation costs the live editing only: the plugin degrades to composition-only configuration instead of failing to load.
+
+> **Where the row lives decides whether settings are writable (dsh 0.1.7+).** A row in the home patch (`~/.dsh/cordis.patch.yml`) is read-only there: the service refuses writes a lower layer would override, and `/rtk reset` reports that refusal honestly. Put the row in a profile composition to keep live editing.
 
 > **Why `readCompaction` is off by default.** Filtering or truncating a `read` result can leave the model editing against text that no longer matches the file. Everything on by default is lossless for the body text it summarizes, or only fires on outputs whose whole shape is being replaced.
 
@@ -166,7 +168,7 @@ Both halves ride the tool pipeline rather than wrapping a tool, because the harn
 
 Both listeners register in the scope the row was mounted into. A preset row therefore covers exactly its own agent (the preset's standing scope is an ancestor of every session that joins it), and a host row covers every agent in the process.
 
-Only the `tools` service is a hard dependency. `settings`, `commands`, and `systemPrompt` are resolved with `ctx.get`, so a composition that omits any of them still gets the optimization.
+The optimization itself needs only the `tools` service. `settings` is declared too — as a timing device: it registers asynchronously, and declaring it parks the plugin until it appears, so the live-settings integration cannot silently miss it (a composition with no settings service at all parks the row instead; every shipped composition has one). A settings surface of an unknown generation degrades to composition-only configuration rather than breaking the plugin. `commands` and `systemPrompt` are resolved with `ctx.get`, so a composition that omits either still gets the optimization.
 
 ### Caveat: the rewriting seam is not a sanctioned extension point
 

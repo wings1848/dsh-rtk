@@ -277,3 +277,88 @@ pwsh 真机执行、grep 超限时的真实会话 e2e、`/rtk` 命令面与 sett
 **一个容易误读的点**：settings 里 `truncate.enabled` 显示 `true`（schema 解析值），而实际行为是**关闭**的 —— 因为插件在运行时探测到 spill 后做了协调。`deferToHarnessSpill` 才是表达该意图的字段。
 
 **注**：这个 bug 之所以能被找到，靠的是先前那次「让失败可见」的改动 —— 在此之前它是完全静默的。
+
+---
+
+## 11. settings 换代：dsh 0.1.7 兼容（2026-09-27）
+
+日期：2026-09-27 · 环境：Node v26.7.0 · 新代：DSH 0.1.7-rc.2（本机全局 bun 安装）· 旧代对照：`@deepseek-ai/dsh-settings@0.1.5-rc.1`（npm 解包）
+
+### 11.1 事实核对
+
+| 断言 | 命令 | 实测输出 |
+|---|---|---|
+| 0.1.7 删掉了旧 settings API | 修复前 `tsc -p tsconfig.json --noEmit` | 4 条错误：`SettingsProvider`/`SettingsScope` 不再导出（TS2614）、`"settings/updated"` 不在 `keyof Events`（TS2345） |
+| 新服务是 `SettingsForms`，方法面 describe/update/replace/mutate/configure | `rg "export declare class" node_modules/@deepseek-ai/dsh-settings/lib/types/index.d.ts` | 只有 `SettingsForms`、`SettingsConflictError`；无 `register`/`get`/`watch` |
+| 旧代确有 register + scope.watch/replace | npm 解包 `@deepseek-ai/dsh-settings@0.1.5-rc.1` 的 `lib/types/index.d.ts` | `SettingsScope<T>{ get(); watch(cb); update(patch); replace(section) }` |
+| 新机制 = `.volatile()` 字段 + 原地提交 + `loader/volatile-update` | `rg "_commitVolatile\|loader/volatile-update" ~/.bun/install/global/node_modules/@deepseek-ai/cordis-plugin-loader/lib/index.js` | `_commitVolatile` 用 `updateVolatile(ref, source)` 写进运行中的引用，随后 `emit("loader/volatile-update", paths)`（只发给所属 fiber） |
+| `.volatile()` 是 3.18.4 才有的 API | `rg volatile` 对照 schemastery 3.18.2 / 3.18.4 | 3.18.2 无输出；3.18.4 有 `Schema.prototype.volatile` 与 `validateVolatileSchema` 路径规则 |
+| 修复前在真宿主形状下**整个插件死亡** | 探针：用 SettingsForms 方法面假件调 `apply` | `apply 抛异常 → TypeError: settings.get is not a function` |
+| 旧 peer 范围装不上新宿主 | `semver.satisfies('0.1.7-rc.2','^0.1.5-rc.1')` | `false`（prerelease 只配同 [major,minor,patch] 元组） |
+| 设置条目 id = 组合行 id，不是插件名 | `SettingsForms.describe` 源码 `ns: entry.options.id` + 本机 `~/.dsh/cordis.patch.yml` | 本机行是 `- id: rtk` → 条目名 `rtk`（不再是 `dsh-rtk`） |
+| 工具管线两代没变 | `rg "tools/(pre-)?execute\|tools/post-execute" dsh-tools/lib/types/index.d.ts` | 事件签名与 `PostToolDecision` 形状均未变；`spillStore` 服务也还在 |
+
+### 11.2 验收标准表
+
+| 标准 | 判定命令 | 期望输出 | 实测 |
+|---|---|---|---|
+| typecheck 干净 | `node --run typecheck` | 退出 0、无输出 | ✅ |
+| 全量测试 | `node --run test` | `fail 0` | ✅ 130/130 |
+| 未知 settings 形状不再弄死插件 | `node --test test/integration.test.ts`（`survives a settings service it does not recognize`） | 通过 | ✅ |
+| 0.1.5 老轨行为不回归 | `test/settings-compat.test.ts` legacy 三例 + integration 的 `settings integration` | 通过 | ✅ |
+| 0.1.7 新轨：读引用 / 监听变更 / reset 定位自己条目 | `test/settings-compat.test.ts` modern 三例 + integration 的 modern 两例 | 通过 | ✅ |
+| 降级路径（未知代、构造期爆炸、reset 被拒、modern 面缺 replace） | `test/settings-compat.test.ts` unknown 两例 + `reports a refused reset` + `survives a modern surface without replace` | 通过 | ✅ |
+| 真 schemastery 接受 volatile 标记并产出引用；`editable()` 两代降级 | `node --test test/schema-contract.test.ts` | 5/5 通过 | ✅ |
+| 编译产物无 dsh-settings 运行时依赖 | `rg "from '@deepseek-ai/dsh-settings'" lib/` | 无输出（退出 1） | ✅ |
+| 锁文件同 scope 单版本 | `rg -o "'?@(deepseek-ai)/(cordis\|schemastery\|cosmokit)@…" pnpm-lock.yaml \| sort -u` | 每包一个版本 | ✅ cordis 4.0.4 / schemastery 3.18.4 / cosmokit 1.8.5 |
+| peer 范围两代都匹配 | `semver.satisfies(v, '^0.1.5-rc.1 \|\| ^0.1.7-rc.2')`，v ∈ 两代 | 都 true | ✅ 0.1.5-rc.1/0.1.5-rc.3/0.1.7-rc.2 全 true |
+
+### 11.3 验红记录（修复前确实失败）
+
+修复前（当时的 `lib/` 对着新宿主的服务形状）4 条新测试全红：
+
+```
+✖ survives a settings service it does not recognize
+  AssertionError: Got unwanted exception. Actual message: "settings.get is not a function"
+✖ survives an empty settings service object        （同上）
+✖ observes live config edits committed into the running references
+  TypeError: settings.get is not a function  at apply (lib/index.js:145)
+✖ resets through the settings service, naming its own profile entry（同上）
+```
+
+修复后 4 条全部通过（连同双轨单测、schema 契约测试与独立复核后的补测，130 项全绿）。
+
+### 11.4 不变量
+
+| 不变量 | 怎么保证 | 验证 |
+|---|---|---|
+| 0.1.5 老宿主行为不变（注册 `dsh-rtk`、watch、replace、双实例跟随） | settings-compat 老轨原样保留旧行为 | fake provider 测试 ✅ |
+| 工具管线行为不变（改写/压缩/通知/spill 协调） | 管线代码一行未动 | 130 项测试全绿 ✅ |
+| 结果尾部 `[exit code: N]` 标记不被挤走 | `appendNotice` 未改 | 测试 ✅ |
+| 编译产物不 import 任何会变的宿主包 | settings 面全部走结构化鸭子类型 | `rg "from '@deepseek-ai/dsh-settings'" lib/` 无输出 ✅ |
+| `Config` 对两代 schemastery 都可加载 | `editable()` 特性探测 `.volatile()` | `test/schema-contract.test.ts` 的 `editable()` 两例 ✅ |
+
+### 11.5 已知限制与部署发现
+
+- **部署发现（0.1.7）**：组合行放在 home patch（`~/.dsh/cordis.patch.yml`）里时，设置页**只读**——服务拒绝会被低层覆盖的写（实测拒绝文案：`Configuration for "rtk" is overridden by a home patch or command-line overlay`）。行放在 **profile 层**则可写（11.6 第 6 轮实测 reset 成功）。本机当前是 home patch 部署，`/rtk reset` 与在线编辑会被如实拒绝；想调参就把行挪进 profile。
+- 新代的设置条目名是**组合行 id**（本机是 `rtk`），不再是插件名 `dsh-rtk`。0.1.5 存量用户层里 `dsh-rtk` 段不会自动迁移（本机 `settings.yaml` 不存在，无实际影响）。
+- peer 范围匹配不到「未来 rc 系」（如 `0.1.8-rc.1`）—— semver 的 prerelease 规则只认同 `[major,minor,patch]` 元组，每出一系 rc 需要一行范围更新（已写进 CHANGELOG）。
+- legacy 轨对真 0.1.5 包的集成仍靠 fake + 旧类型面留痕（见 11.7）。
+
+### 11.6 真宿主 e2e（隔离 DSH_HOME，2026-09-27 已做）
+
+**做法**：独立 `DSH_HOME`（`.e2e/home`，不碰运行中的 GUI 宿主），拷贝 headless profile、换入 `pnpm pack` 的 0.1.1 构建、`.credentials.yaml`/`llm-deepseek`/`dsh-config-manager` 以**软链**复用（凭据不复制），`--patch` 挂 `id: rtk` 行 + 一个取证探针插件（把发现写进第一个 bash 结果）。`--dump-config` 干跑先证明两行被正确组合。共 6 轮 headless 一次性会话。
+
+| 轮 | 配置 | 实测证据（会话日志原文） |
+|---|---|---|
+| 1 开通知 | `--patch` 行 + `showRewriteNotifications: true` | `[rtk] rewrote: git status -> rtk git status`；`git status` 经 rtk 执行（结果带 rtk 自己的 `[rtk] /!\\ No hook installed` stderr）；`seq 1 30000`（约 165KB）交给 harness spill 且**不双截断**（`deferToHarnessSpill` 协调生效，完整输出落 spill 文件） |
+| 2 安静 | 同行、默认配置 | 改写照样发生（同样有 rtk stderr），但**没有** `[rtk] rewrote` 通知 —— 默认安静 ✓ |
+| 3 对照 | **不挂** rtk 行，只留探针 | `git status` 原样输出（无任何 rtk 痕迹）；`hasRtkEntry=false hasRtkCommand=false` —— 「什么都没发生」也被断言 |
+| 4 探针 v2 | `commands.execute('/rtk …')` | `THREW … reading 'session'`：宿主的命令执行先写 `command/run` 生命周期日志，探针不带会话上下文 —— 宿主机制，非插件问题 |
+| 5 探针 v3 | `--patch` 行，直接调**注册到 registry 的 handler** | `rtkPath=the \`rtk\` entry in the harness settings document`；`rtkReset=dsh-rtk: reset was refused (Configuration for "rtk" is overridden by a home patch or command-line overlay) — edit the composition \`config:\` block instead.`（审计发现 1 的兜底当场立功：拒绝被如实报告，没有崩、没有假成功） |
+| 6 探针 v3 | 行挪进 **profile 层** | `rtkReset=dsh-rtk: user overrides cleared — configuration is back to the composition's values.`（真 SettingsForms 上的现代 reset 成功路径）；reset 后 `enabled=true` 保留（composition 层不被抹） |
+
+**探针还实测到**：`settingsEntries=…,rtk`（条目按组合行 id 命名 ✓，describe() 只列有 volatile 表单的条目 → 我们的 `.volatile()` 标记在真宿主生效 ✓）；`commands=…,rtk`（`/rtk` 注册成功 ✓）；`rtkValue.showRewriteNotifications` 随 patch 配置取值（true/false 两轮各验一次）。
+
+**复现配方**（清理前的 `.e2e/` 已删；重跑照此）：`pnpm pack` → 建 `DSH_HOME`、profile 拷贝换入 tarball、软链凭据 → `--patch` 行 + 探针 → `dsh --profile e2e --patch … "用 bash 跑 …"` → `zstd -d` 会话日志取证。
+

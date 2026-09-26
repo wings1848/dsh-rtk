@@ -118,6 +118,30 @@ export const BOUNDS = {
 } as const
 
 /**
+ * Mark one schema field live-editable at runtime (schemastery's `volatile` role).
+ *
+ * Feature-detected, because the two harness generations this plugin supports
+ * ship different schemastery lines: `Schema.prototype.volatile` exists from
+ * 3.18.4 on, and a schema built against 3.18.2 must stay loadable there. The
+ * old settings provider registers the whole namespace regardless; the modern
+ * settings page only lists fields carrying this mark. Adding a top-level field
+ * to {@link Config} means wrapping it here once — fields added *inside*
+ * `outputCompaction` inherit editability from the container.
+ *
+ * The return type deliberately stays `T`: `RtkConfig` is hand-written and
+ * normalized separately, so the volatile wrapper never leaks into the types
+ * this plugin passes around (on old hosts the values are not wrapped at all).
+ *
+ * Exported for the schema-contract test, which pins both halves of the
+ * behavior: marked on a modern schemastery, and left untouched on one without
+ * the method.
+ */
+export function editable<T>(schema: T): T {
+  const candidate = schema as unknown as { volatile?: () => unknown }
+  return typeof candidate.volatile === 'function' ? (candidate.volatile() as T) : schema
+}
+
+/**
  * The composition-facing configuration schema.
  *
  * Exported as both a value (the schemastery schema the loader validates and
@@ -126,31 +150,42 @@ export const BOUNDS = {
  * a hand-written one would have to restate every nested field.
  */
 export const Config = z.object({
-  enabled: z.boolean().default(DEFAULT_CONFIG.enabled).description('Master switch for command rewriting and output compaction.'),
-  mode: z
-    .union([z.const('rewrite'), z.const('suggest')])
-    .default(DEFAULT_CONFIG.mode)
-    .description('`rewrite` replaces a supported command; `suggest` only reports the equivalent.'),
-  guardWhenRtkMissing: z
-    .boolean()
-    .default(DEFAULT_CONFIG.guardWhenRtkMissing)
-    .description('Run the original command unchanged when the rtk executable is unavailable.'),
-  showRewriteNotifications: z
-    .boolean()
-    .default(DEFAULT_CONFIG.showRewriteNotifications)
-    .description('Record rewrite decisions so they are visible in the session log.'),
-  notifyWhenRtkMissing: z
-    .boolean()
-    .default(DEFAULT_CONFIG.notifyWhenRtkMissing)
-    .description('Tell each session once that command rewriting is off because rtk is not installed.'),
-  rtkExecutable: z.string().default(DEFAULT_CONFIG.rtkExecutable).description('Executable name or path for rtk.'),
-  rewriteTimeoutMs: z.natural().default(DEFAULT_CONFIG.rewriteTimeoutMs).description('Deadline in milliseconds for one `rtk rewrite` call.'),
-  compactedTools: z
-    .array(z.string())
-    .default([...DEFAULT_CONFIG.compactedTools])
-    .description('Tool names whose text results pass through the compaction pipeline.'),
-  outputCompaction: z
-    .object({
+  enabled: editable(z.boolean().default(DEFAULT_CONFIG.enabled).description('Master switch for command rewriting and output compaction.')),
+  mode: editable(
+    z
+      .union([z.const('rewrite'), z.const('suggest')])
+      .default(DEFAULT_CONFIG.mode)
+      .description('`rewrite` replaces a supported command; `suggest` only reports the equivalent.'),
+  ),
+  guardWhenRtkMissing: editable(
+    z
+      .boolean()
+      .default(DEFAULT_CONFIG.guardWhenRtkMissing)
+      .description('Run the original command unchanged when the rtk executable is unavailable.'),
+  ),
+  showRewriteNotifications: editable(
+    z
+      .boolean()
+      .default(DEFAULT_CONFIG.showRewriteNotifications)
+      .description('Record rewrite decisions so they are visible in the session log.'),
+  ),
+  notifyWhenRtkMissing: editable(
+    z
+      .boolean()
+      .default(DEFAULT_CONFIG.notifyWhenRtkMissing)
+      .description('Tell each session once that command rewriting is off because rtk is not installed.'),
+  ),
+  rtkExecutable: editable(z.string().default(DEFAULT_CONFIG.rtkExecutable).description('Executable name or path for rtk.')),
+  rewriteTimeoutMs: editable(z.natural().default(DEFAULT_CONFIG.rewriteTimeoutMs).description('Deadline in milliseconds for one `rtk rewrite` call.')),
+  compactedTools: editable(
+    z
+      .array(z.string())
+      .default([...DEFAULT_CONFIG.compactedTools])
+      .description('Tool names whose text results pass through the compaction pipeline.'),
+  ),
+  outputCompaction: editable(
+    z
+      .object({
       enabled: z.boolean().default(true),
       stripAnsi: z.boolean().default(true),
       readCompaction: z.object({ enabled: z.boolean().default(false) }),
@@ -175,11 +210,41 @@ export const Config = z.object({
         maxChars: z.natural().default(DEFAULT_CONFIG.outputCompaction.truncate.maxChars),
       }),
     })
-    .default(DEFAULT_CONFIG.outputCompaction),
+    .default(DEFAULT_CONFIG.outputCompaction)),
 })
 
 function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {}
+}
+
+/**
+ * Identify cosmokit Volatile references without importing cosmokit.
+ *
+ * Fields marked {@link editable} are handed to the plugin as live references
+ * (`config.field.get()`), and the loader updates them in place on a settings
+ * edit. The reference protocol is identified by a *registered* symbol exactly
+ * so consumers can recognize it across ESM/CJS copies and across the library
+ * versions the two harness generations ship — so this check is the contract,
+ * not a guess.
+ */
+const VOLATILE_WRITE = Symbol.for('cosmokit.volatile.write')
+
+function unwrapVolatile(value: unknown): unknown {
+  if (typeof value !== 'object' || value === null) return value
+  const holder = value as Record<PropertyKey, unknown>
+  return VOLATILE_WRITE in holder && typeof holder.get === 'function' ? (holder.get as () => unknown)() : value
+}
+
+/** Deep-copy plain configuration data, reading any Volatile reference on the way. */
+function plainize(value: unknown): unknown {
+  const direct = unwrapVolatile(value)
+  if (Array.isArray(direct)) return direct.map(plainize)
+  if (typeof direct === 'object' && direct !== null) {
+    const result: Record<string, unknown> = {}
+    for (const [key, item] of Object.entries(direct)) result[key] = plainize(item)
+    return result
+  }
+  return direct
 }
 
 function pickBoolean(value: unknown, fallback: boolean): boolean {
@@ -208,10 +273,12 @@ function pickStringList(value: unknown, fallback: readonly string[]): string[] {
  * entry is also reachable from tests, from `apply()` called directly, and from
  * a runtime patch, so every field is re-derived rather than trusted. Numbers
  * are clamped to {@link BOUNDS} so a hand-edited value cannot disable the
- * pipeline's safeguards by accident.
+ * pipeline's safeguards by accident. Volatile references (the modern harness's
+ * live-editable fields) are read through on the way, so callers on either
+ * harness generation can hand in whatever their config object holds.
  */
 export function normalizeConfig(raw: unknown): RtkConfig {
-  const root = asRecord(raw)
+  const root = asRecord(plainize(raw))
   const compaction = asRecord(root.outputCompaction)
   const readCompaction = asRecord(compaction.readCompaction)
   const smartTruncate = asRecord(compaction.smartTruncate)

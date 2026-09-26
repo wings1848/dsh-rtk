@@ -5,10 +5,10 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { PostToolDecision, ToolDispatchExecution, ToolExecution, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import type { CommandRuntime } from '@deepseek-ai/dsh-commands'
-import type { SettingsProvider, SettingsScope } from '@deepseek-ai/dsh-settings'
 import type { SystemPrompt } from '@deepseek-ai/dsh-system-prompt'
 
-import { Config, normalizeConfig, type RtkConfig } from './config.js'
+import { Config, type RtkConfig } from './config.js'
+import { createSettingsBridge } from './settings-compat.js'
 import { READ_COMPACTION_BANNER_PREFIX, compactToolResult } from './compact/index.js'
 import { parseBashResult, renderBashResult } from './compact/dsh-result.js'
 import { createMetricsTracker } from './metrics.js'
@@ -27,12 +27,13 @@ export const name = 'rtk'
  *
  * `settings` is declared too, and not because the plugin cannot run without it
  * — it can, entirely from the composition's `config:` block. It is declared
- * because the provider registers *asynchronously*: it reads the settings
- * document first, so a plain `ctx.get('settings')` during `apply` can find
- * nothing and the namespace silently never registers. Observed exactly that in
- * production (`/rtk` reported "settings service unavailable" while a sibling
- * `ctx.get('spillStore')` succeeded). Declaring it makes Cordis park this
- * plugin until the provider appears, then activate it.
+ * because the service registers *asynchronously* on every harness generation:
+ * it reads the settings document first, so a plain `ctx.get('settings')` during
+ * `apply` can find nothing and the live-settings integration silently never
+ * attaches. Observed exactly that in production (`/rtk` reported "settings
+ * service unavailable" while a sibling `ctx.get('spillStore')` succeeded).
+ * Declaring it makes Cordis park this plugin until the service appears, then
+ * activate it.
  *
  * `commands` and `systemPrompt` stay optional `ctx.get` lookups: they are
  * registered early enough to be present, and a composition without them should
@@ -128,7 +129,13 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
     return next
   }
 
-  let config = coordinate(normalizeConfig(rawConfig))
+  // The settings seam differs between harness generations (see
+  // settings-compat.ts for the two shapes and why detection is by shape). The
+  // plugin's own behavior never depends on which one answered: configuration
+  // is `bridge.read()`, edits arrive through `bridge.onChange`, and an
+  // unrecognized service costs the live-settings integration only.
+  const bridge = createSettingsBridge(ctx, rawConfig)
+  let config = coordinate(bridge.read())
   let runtimeStatus: RtkRuntimeStatus = { rtkAvailable: false }
   const metrics = createMetricsTracker()
   /** Rewrite decisions awaiting their result, keyed by call id, for `suggest` mode. */
@@ -138,41 +145,18 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
   /** Sessions already told that rtk is absent, so the notice is emitted once each. */
   const notifiedAgents = new Set<string>()
 
-  // The settings namespace is process-global, so only the first instance of
-  // this plugin can own it. A host-plane row and a preset row both mounted, or
-  // two presets mounting the same row, would otherwise fail the second mount
-  // outright — a configuration convenience must never be the reason a whole
-  // preset refuses to activate. The loser follows the winner through the
-  // settings event instead.
-  const settings = ctx.get('settings') as SettingsProvider | undefined
-  let ownedScope: SettingsScope<unknown> | undefined
-  // Surfaced by `/rtk show`. A silently swallowed registration failure hides
-  // the only runtime-editable configuration path this plugin has, and the
-  // failure mode (settings edits simply do nothing) is invisible otherwise.
-  let settingsNote: string
-  if (settings === undefined) {
-    settingsNote = 'settings service unavailable — configuration comes from the composition only'
-  } else {
-    try {
-      const scope = settings.register('dsh-rtk', Config, { base: rawConfig })
-      ownedScope = scope as unknown as SettingsScope<unknown>
-      config = coordinate(normalizeConfig(scope.get()))
-      scope.watch((next) => {
-        config = coordinate(normalizeConfig(next))
+  // Keep the normalized copy in step with committed settings edits. The bridge
+  // abstracts over how each harness generation announces them (`scope.watch`
+  // on the old one, `loader/volatile-update` on the new one); either way the
+  // fixpoint is `bridge.read()`.
+  ctx.effect(
+    () =>
+      bridge.onChange(() => {
+        config = coordinate(bridge.read())
         applySourceFilterNote()
-      })
-      settingsNote = 'the `dsh-rtk` namespace in the harness settings document'
-    } catch (error) {
-      settingsNote = `settings namespace unavailable (${error instanceof Error ? error.message : String(error)}) — configuration comes from the composition only`
-      const existing = settings.get('dsh-rtk')
-      if (existing !== undefined) config = coordinate(normalizeConfig(existing))
-      ctx.on('settings/updated', (ns: string, next: unknown) => {
-        if (ns !== 'dsh-rtk') return
-        config = coordinate(normalizeConfig(next))
-        applySourceFilterNote()
-      })
-    }
-  }
+      }),
+    'dsh-rtk.settings-watch',
+  )
 
   let disposeNote: (() => void) | undefined
   const systemPrompt = ctx.get('systemPrompt') as SystemPrompt | undefined
@@ -386,15 +370,15 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
     const command = createRtkCommand({
       getConfig: () => config,
       resetConfig: async () => {
-        if (ownedScope === undefined) return
-        await ownedScope.replace({})
-        config = coordinate(normalizeConfig(settings?.get('dsh-rtk')))
+        const message = await bridge.reset()
+        config = coordinate(bridge.read())
+        return message
       },
       getRuntimeStatus: () => runtimeStatus,
       refreshRuntimeStatus,
       getMetrics: () => metrics.summary(),
       clearMetrics: () => metrics.clear(),
-      configLocation: () => settingsNote,
+      configLocation: () => bridge.note,
     })
     ctx.effect(() => commands.register(command), 'dsh-rtk.command')
   }

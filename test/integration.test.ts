@@ -20,7 +20,10 @@ interface Listener {
 }
 
 /** A context recording every listener the plugin registers. */
-function fakeContext(services: Record<string, unknown> = {}): {
+function fakeContext(
+  services: Record<string, unknown> = {},
+  options: { fiber?: unknown } = {},
+): {
   ctx: any
   listeners: Map<string, Listener[]>
   emit(event: string, ...args: unknown[]): Promise<unknown>
@@ -29,6 +32,7 @@ function fakeContext(services: Record<string, unknown> = {}): {
   const listeners = new Map<string, Listener[]>()
   const state = { effects: 0 }
   const ctx = {
+    fiber: options.fiber,
     get: (name: string) => services[name],
     on: (event: string, listener: Listener) => {
       const existing = listeners.get(event) ?? []
@@ -394,5 +398,113 @@ describe('settings integration', () => {
     const harness = fakeContext()
     assert.doesNotThrow(() => apply(harness.ctx, normalizeConfig({}) as never))
     assert.ok(harness.listeners.has('tools/execute'), 'the rewriting half must still register')
+  })
+
+  it('survives a settings service it does not recognize', () => {
+    // dsh 0.1.7-rc.2 replaced the provider with `SettingsForms`, which has no
+    // `register()` and no `get()`. The plugin used to throw
+    // `TypeError: settings.get is not a function` from `apply` — taking the
+    // rewriting half and the compaction half down with it. An unknown settings
+    // surface must cost the plugin its live-settings integration, never its life.
+    const harness = fakeContext({
+      settings: { describe: () => [], update: async () => {}, replace: async () => {} },
+    })
+    assert.doesNotThrow(() => apply(harness.ctx, normalizeConfig({}) as never))
+    assert.ok(harness.listeners.has('tools/execute'), 'the rewriting half must still register')
+    assert.ok(harness.listeners.has('tools/post-execute'), 'the compaction half must still register')
+    assert.ok(harness.listeners.has('tools/post-execute'))
+  })
+
+  it('survives an empty settings service object', () => {
+    const harness = fakeContext({ settings: {} })
+    assert.doesNotThrow(() => apply(harness.ctx, normalizeConfig({}) as never))
+    assert.ok(harness.listeners.has('tools/execute'), 'the rewriting half must still register')
+  })
+})
+
+describe('modern settings host (SettingsForms)', () => {
+  /** A Volatile-shaped reference, as schemastery wraps marked fields in. */
+  function ref(initial: unknown): { get(): unknown } {
+    const write = Symbol.for('cosmokit.volatile.write')
+    let current = initial
+    return {
+      get: () => current,
+      [write]: (next: unknown) => {
+        current = next
+      },
+    } as { get(): unknown }
+  }
+
+  /** The SettingsForms method surface, as far as the plugin consumes it. */
+  function modernSettings(calls: { replaced: Array<{ ns: string; section: unknown }> }) {
+    return {
+      describe: () => [],
+      update: async () => {},
+      mutate: async () => {},
+      configure: () => () => {},
+      replace: async (ns: string, section: unknown) => {
+        calls.replaced.push({ ns, section })
+      },
+    }
+  }
+
+  it('observes live config edits committed into the running references', async () => {
+    const calls = { replaced: [] as Array<{ ns: string; section: unknown }> }
+    const enabled = ref(true)
+    const harness = fakeContext({ settings: modernSettings(calls) })
+    const raw = { ...normalizeConfig({}), enabled }
+    apply(harness.ctx, raw as never)
+
+    const huge = [{ type: 'text', text: 'y'.repeat(30000) }]
+    async function postExecute() {
+      const exec = { name: 'bash', callId: 'live-1', arguments: { command: 'cat f' }, signal: new AbortController().signal }
+      return harness.emit(
+        'tools/post-execute',
+        exec,
+        { isError: false, value: 'ok', content: huge },
+        async () => ({ kind: 'accept', content: huge }),
+      )
+    }
+
+    // With no spill policy mounted the plugin truncates to its own budget.
+    const before = await postExecute()
+    assert.ok(
+      (before.content ?? []).map((block: { text: string }) => block.text).join('').length <= 13000,
+      'the plugin must compact while enabled',
+    )
+
+    // The loader commits a volatile-only settings edit in place and announces
+    // it; the plugin must stop compacting without a remount.
+    ;(enabled as unknown as { [key: symbol]: (next: unknown) => void })[Symbol.for('cosmokit.volatile.write')](false)
+    await harness.emit('loader/volatile-update', [['enabled']])
+
+    const after = await postExecute()
+    const text = (after.content ?? []).map((block: { text: string }) => block.text).join('')
+    assert.equal(text.length, 30000, 'a disabled plugin must leave the result untouched')
+  })
+
+  it('resets through the settings service, naming its own profile entry', async () => {
+    const calls = { replaced: [] as Array<{ ns: string; section: unknown }> }
+    const definitions: Array<{ name: string; handler: (invocation: { rawInput: string }) => Promise<{ kind: string; text: string }> }> = []
+    const harness = fakeContext(
+      {
+        settings: modernSettings(calls),
+        commands: {
+          register: (definition: (typeof definitions)[number]) => {
+            definitions.push(definition)
+            return () => {}
+          },
+        },
+      },
+      { fiber: { entry: { options: { id: 'rtk' } } } },
+    )
+    apply(harness.ctx, normalizeConfig({}) as never)
+
+    const command = definitions.find((entry) => entry.name === 'rtk')
+    assert.ok(command, 'the /rtk command must register against the modern host')
+    const result = await command.handler({ rawInput: 'reset' })
+    assert.equal(result.kind, 'success')
+    assert.match(String(result.text), /user overrides cleared/, 'the report line must describe what a reset actually does')
+    assert.deepEqual(calls.replaced, [{ ns: 'rtk', section: {} }], 'reset must target the entry the plugin runs as')
   })
 })

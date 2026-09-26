@@ -99,7 +99,7 @@ ln -s /path/to/dsh-rtk ~/.dsh/node_modules/@wingsbutterfly/dsh-rtk
 agentPresets.copy('standard', 'rtk', 'RTK 优化')
 ```
 
-这一行挂在 **host 平面**同样有效（写进 `~/.dsh/cordis.patch.yml`），会覆盖该部署下的所有会话——但需要重启宿主，而且 host 行与 preset 行会同时想要同一个进程级 settings 命名空间。**两个平面只选一个。**
+这一行挂在 **host 平面**同样有效（写进 `~/.dsh/cordis.patch.yml`），会覆盖该部署下的所有会话——但需要重启宿主，而且在 dsh 0.1.5 上，host 行与 preset 行会同时想要同一个进程级 `dsh-rtk` settings 命名空间（0.1.7 按行 id 区分，已无此冲突）。**两个平面只选一个。**
 
 ## 配置
 
@@ -139,7 +139,9 @@ agentPresets.copy('standard', 'rtk', 'RTK 优化')
         maxChars: 12000              # 1000–200000
 ```
 
-配置同时注册为 harness 设置文档里的 `dsh-rtk` 命名空间，可以在那里编辑并即时生效、无需重启。组合里的 `config:` 块提供 `base` 层，设置文档在其上叠加用户层。
+配置也能在 harness 设置文档里在线编辑、即时生效、无需重启。入口随宿主版本不同：dsh 0.1.7+ 上，这一行会成为设置文档里自己的条目（用组合行的 id 命名，上例即 `rtk`），每个字段都可编辑；dsh 0.1.5 上则是 `dsh-rtk` 命名空间。无论哪一代，组合的 `config:` 块提供基础层，设置文档在其上叠加用户层——`/rtk path` 会报告当前插件能看到的入口。遇到不认识的 settings 服务，插件只失去在线编辑能力、降级为「仅组合配置」继续工作，不会整个挂掉。
+
+> **行放在哪，决定设置可不可写（dsh 0.1.7+）。** home patch（`~/.dsh/cordis.patch.yml`）里的行是**只读**的：服务会拒绝被低层覆盖的写，`/rtk reset` 也会如实报告这个拒绝。想保留在线调参，就把行放进 profile 的组合里。
 
 > **为什么 `readCompaction` 默认关。** 过滤或截断 `read` 结果，可能让模型拿到的文本与文件不再一致，编辑就会失配。默认开启的每一项，要么对它归纳的正文是无损的，要么只作用于整个形态都会被替换掉的输出。
 
@@ -166,7 +168,7 @@ agentPresets.copy('standard', 'rtk', 'RTK 优化')
 
 两个监听器都注册在该行被挂载的 scope 里。因此 preset 行恰好覆盖它自己的 agent（preset 的 standing scope 是每个加入它的会话的祖先），而 host 行覆盖进程内所有 agent。
 
-硬依赖只有 `tools` 服务。`settings`、`commands`、`systemPrompt` 都用 `ctx.get` 解析，缺少其中任何一个的组合仍然能获得优化。
+优化本身只需要 `tools` 服务。`settings` 也写进注入，但只是**时序装置**：它异步注册，声明它就能让 Cordis 把本插件挂起等它就位，live 设置集成不会静默落空（完全没有 settings 服务的组合会让这一行一直等着——官方组合都带它）。不认识的 settings 服务只降级为「仅组合配置」，不会弄坏插件。`commands`、`systemPrompt` 用 `ctx.get` 解析，缺了它们的组合依然获得优化。
 
 ### 注意：改写所用的接缝不是官方扩展点
 
