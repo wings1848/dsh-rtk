@@ -362,3 +362,59 @@ pwsh 真机执行、grep 超限时的真实会话 e2e、`/rtk` 命令面与 sett
 
 **复现配方**（清理前的 `.e2e/` 已删；重跑照此）：`pnpm pack` → 建 `DSH_HOME`、profile 拷贝换入 tarball、软链凭据 → `--patch` 行 + 探针 → `dsh --profile e2e --patch … "用 bash 跑 …"` → `zstd -d` 会话日志取证。
 
+## 12. dsh 0.2.0 兼容（2026-10-03）
+
+日期：2026-10-03 · 环境：Node v26.7.0 · 新代：`@deepseek-ai/*@0.2.0-rc.2`（npm 安装）· 对照：本机全局 DSH 0.2.0-rc.1（`dsh --version` 实测）
+
+### 12.1 事实核对
+
+| 断言 | 命令 | 实测输出 |
+|---|---|---|
+| 0.2.0-rc.2 与 0.2.0-rc.1 的类型面完全一致 | `diff -rq <全局0.2.0-rc.1>/lib/types <npm 0.2.0-rc.2>/lib/types`（dsh-tools / dsh-llm / dsh-commands / dsh-settings / dsh-system-prompt 五包） | 五包全部无输出（零差异） |
+| 工具三缝签名未变 | `rg "tools/(pre-)?execute\|tools/post-execute" <0.2.0-rc.2>/dsh-tools/lib/types/index.d.ts` | `tools/post-execute(exec, result, next)` 等三条签名与 0.1.7 一致；`PostToolDecision` 仍是 `accept` / `block` |
+| settings 面未变 | `rg "replace\(" <0.2.0-rc.2>/dsh-settings/lib/types/index.d.ts`；`rg "loader/volatile-update" ~/.bun/.../cordis-plugin-loader/lib/index.js` | `replace(ns, section, expectedRevision?)` 仍在；`loader/volatile-update` 仍由 loader 发出 |
+| 工具名与结果尾标记未变 | `rg "name: .bash.\|exit code:" ~/.bun/.../dsh-tool-bash/lib/index.js` | `name: "bash"` / `name: "pwsh"`、`[exit code: N]` 仍在 |
+| 旧 peer 范围匹配不到 0.2.0 | `semver.satisfies('0.2.0-rc.2','^0.1.5-rc.1 \|\| ^0.1.7-rc.2')` | `false`（0.2.0-rc.1 同为 `false`）→ 这就是本次要修的不兼容 |
+| 新 peer 范围覆盖 0.2.0 系 | `semver.satisfies(v,'^0.1.5-rc.1 \|\| ^0.1.7-rc.2 \|\| ^0.2.0-rc.1')` | 0.1.5-rc.1 / 0.1.7-rc.2 / 0.2.0-rc.1 / 0.2.0-rc.2 / 0.2.0 全 `true`；0.2.1-alpha.1 `false`（alpha 不误收） |
+| 真宿主上插件活着 | 本机 GUI 宿主 = 0.2.0-rc.1，`~/.dsh/cordis.patch.yml` 有 `id: rtk` 行 | 会话里 bash 命令确实被改写成 `rtk …`（本次核查期间多次实测到） |
+
+### 12.2 验收标准表
+
+| 标准 | 判定命令 | 期望输出 | 实测 |
+|---|---|---|---|
+| 对 0.2.0-rc.2（npm 全新安装）typecheck 干净 | `DSH_INSTALL_ROOT=<rc2 安装>/node_modules node scripts/link-dsh.mjs && tsc -p tsconfig.json --noEmit` | 退出 0、无输出 | ✅ |
+| 对 0.2.0-rc.2 全量测试 | 同上 link 后 `node --test test/*.test.ts` | `fail 0` | ✅ 130/130 |
+| 对 0.2.0-rc.1（本机宿主）typecheck + 测试 | `node --run check` | `fail 0` | ✅ 132/132 |
+| peer 范围漂移会被测红 | `node --test test/harness-compat.test.ts` | 先红后绿 | ✅ 见 12.3 |
+| 锁文件同 scope 单版本 | `rg -o "'?@deepseek-ai/[^@]+@0\.2\.0-rc\.[0-9]+" pnpm-lock.yaml \| sort -u` | 每包一个版本 | ✅ 全部 0.2.0-rc.2 |
+| 发布包体正确 | `pnpm pack --dry-run`（或 `npm publish` 前的 `prepack`） | 含 lib/src/docs，版本 0.1.2 | ✅ |
+
+### 12.3 验红记录（守卫测试修复前确实失败）
+
+新守卫 `test/harness-compat.test.ts` 在「devDeps 已指 0.2.0-rc.2、peer 范围还停在 0.1.x」的状态下跑：
+
+```
+✖ covers every dsh package version we build and test against
+  AssertionError: @deepseek-ai/dsh-commands: devDependency is ^0.2.0-rc.2 but
+    the peer range "^0.1.5-rc.1 || ^0.1.7-rc.2" has no 0.2.0 clause
+  （dsh-llm / dsh-settings / dsh-system-prompt / dsh-tools 同）
+ℹ pass 1
+ℹ fail 1
+```
+
+补上 `|| ^0.2.0-rc.1` 后 2/2 通过；全量 132 项全绿。
+
+### 12.4 不变量
+
+| 不变量 | 怎么保证 | 验证 |
+|---|---|---|
+| 插件代码一行未动 | 本次只改 package.json / 文档 / 新增守卫测试 | `git diff --stat` 无 `src/` ✅ |
+| 0.1.5 / 0.1.7 老宿主行为不回归 | 130 项旧测试原样通过，双轨设置桥未动 | ✅ |
+| 编译产物不 import 会变的宿主包 | 同 11.4 | `rg "from '@deepseek-ai/dsh-settings'" lib/` 无输出 ✅ |
+| 结果尾部 `[exit code: N]` 标记不被挤走 | `appendNotice` 未改 | 测试 ✅ |
+
+### 12.5 已知限制
+
+- **未做 0.2.0 真宿主的 11.6 式六轮 e2e**：依据是 0.2.0-rc.1 与 0.2.0-rc.2 的 `lib/types` 零差异、两轮130 项测试全绿，加上本机 0.2.0-rc.1 宿主上插件确实在改写命令。要补就照 11.6 的配方换 0.2.0 重跑。
+- 守卫测试只在「devDeps 也前移」时报警：如果只升级宿主而不动 devDeps，仍要人工记得加一行 peer 范围（这是 semver prerelease 规则的固有形状，无法前瞻未来 rc 系）。
+

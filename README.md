@@ -66,6 +66,9 @@ With `deferToHarnessSpill` on (the default) the plugin turns its own truncation 
 
 ## Install
 
+**Supported harness:** dsh 0.1.5, 0.1.7 and 0.2.0 — each verified, evidence in
+[`docs/verification.md`](docs/verification.md). Node >= 22.18.
+
 ### 1. Install the package
 
 ```bash

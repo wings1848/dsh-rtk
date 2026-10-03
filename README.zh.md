@@ -67,6 +67,8 @@
 
 ## 安装
 
+**支持的宿主**：dsh 0.1.5、0.1.7、0.2.0 三代，每代都实测过，证据见 [`docs/verification.md`](docs/verification.md)。Node >= 22.18。
+
 ### 1. 安装包
 
 ```bash

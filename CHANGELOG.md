@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.1.2
+
+### Harness compatibility
+
+- Runs on dsh 0.2.0 (0.2.0-rc.1 and 0.2.0-rc.2). No plugin code changed: the
+  seams it hangs on are untouched in 0.2.0 — `tools/execute` and
+  `tools/post-execute` with the same signatures, the `bash`/`pwsh` tool names,
+  the trailing `[exit code: N]` marker, and the settings surface
+  (`SettingsForms.replace`, `loader/volatile-update`). `diff -rq` over the
+  `lib/types` of 0.2.0-rc.1 and 0.2.0-rc.2 reports no difference, and the full
+  suite passes against both: 130/130 against the locally installed 0.2.0-rc.1
+  and 130/130 against a fresh 0.2.0-rc.2 pulled from npm
+  ([`docs/verification.md`](docs/verification.md) §12).
+- Peer ranges now include the 0.2.0 train: `^0.1.5-rc.1 || ^0.1.7-rc.2 ||
+  ^0.2.0-rc.1` for each `@deepseek-ai/dsh-*` package. That clause matches
+  0.2.0-rc.1, 0.2.0-rc.2 and 0.2.0 itself, and deliberately not 0.2.1-alpha.1
+  (`semver.satisfies` verified for all five). Installing on a 0.2.0 host no
+  longer reports an unsatisfied peer.
+- devDependencies moved to 0.2.0-rc.2, so CI typechecks against the newest
+  harness instead of the 0.1.7 one.
+- New guard test: `test/harness-compat.test.ts` fails whenever a `dsh-*`
+  devDependency moves to a new rc train without a matching peer-range clause —
+  the exact drift 0.1.1 shipped with.
+
 ## 0.1.1
 
 ### Harness compatibility
