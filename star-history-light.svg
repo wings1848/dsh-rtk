@@ -13,10 +13,10 @@
   <text x="42" y="97.0" text-anchor="end" font-family="ui-sans-serif,-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11" fill="#656d76">3</text>
   <line x1="52" y1="44.0" x2="832" y2="44.0" stroke="#eaeef2"/>
   <text x="42" y="48.0" text-anchor="end" font-family="ui-sans-serif,-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11" fill="#656d76">4</text>
-  <path d="M 52.0,240.0 L 52.0,240.0 L 87.5,240.0 L 122.9,240.0 L 158.4,240.0 L 193.8,240.0 L 229.3,240.0 L 264.7,240.0 L 300.2,240.0 L 335.6,240.0 L 371.1,240.0 L 406.5,240.0 L 442.0,240.0 L 477.5,240.0 L 512.9,240.0 L 548.4,240.0 L 583.8,240.0 L 619.3,240.0 L 654.7,240.0 L 690.2,240.0 L 725.6,240.0 L 761.1,240.0 L 796.5,240.0 L 832.0,240.0 L 832.0,240.0 Z" fill="#1a7f37" fill-opacity="0.14"/>
-  <polyline points="52.0,240.0 87.5,240.0 122.9,240.0 158.4,240.0 193.8,240.0 229.3,240.0 264.7,240.0 300.2,240.0 335.6,240.0 371.1,240.0 406.5,240.0 442.0,240.0 477.5,240.0 512.9,240.0 548.4,240.0 583.8,240.0 619.3,240.0 654.7,240.0 690.2,240.0 725.6,240.0 761.1,240.0 796.5,240.0 832.0,240.0" fill="none" stroke="#1a7f37" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M 52.0,240.0 L 52.0,240.0 L 85.9,240.0 L 119.8,240.0 L 153.7,240.0 L 187.7,240.0 L 221.6,240.0 L 255.5,240.0 L 289.4,240.0 L 323.3,240.0 L 357.2,240.0 L 391.1,240.0 L 425.0,240.0 L 459.0,240.0 L 492.9,240.0 L 526.8,240.0 L 560.7,240.0 L 594.6,240.0 L 628.5,240.0 L 662.4,240.0 L 696.3,240.0 L 730.3,240.0 L 764.2,240.0 L 798.1,240.0 L 832.0,240.0 L 832.0,240.0 Z" fill="#1a7f37" fill-opacity="0.14"/>
+  <polyline points="52.0,240.0 85.9,240.0 119.8,240.0 153.7,240.0 187.7,240.0 221.6,240.0 255.5,240.0 289.4,240.0 323.3,240.0 357.2,240.0 391.1,240.0 425.0,240.0 459.0,240.0 492.9,240.0 526.8,240.0 560.7,240.0 594.6,240.0 628.5,240.0 662.4,240.0 696.3,240.0 730.3,240.0 764.2,240.0 798.1,240.0 832.0,240.0" fill="none" stroke="#1a7f37" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
   <circle cx="832.0" cy="240.0" r="5" fill="#ffffff"/>
   <circle cx="832.0" cy="240.0" r="3.5" fill="#1a7f37"/>
   <text x="52" y="268" font-family="ui-sans-serif,-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11" fill="#656d76">2026-09-12</text>
-  <text x="832" y="268" text-anchor="end" font-family="ui-sans-serif,-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11" fill="#656d76">2026-10-04</text>
+  <text x="832" y="268" text-anchor="end" font-family="ui-sans-serif,-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11" fill="#656d76">2026-10-05</text>
 </svg>
