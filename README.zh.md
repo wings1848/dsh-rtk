@@ -75,6 +75,8 @@
 dsh plugin --profile web add @wingsbutterfly/dsh-rtk
 ```
 
+> **这一步只装包，不生效。** 插件管理器会显示「已安装，未生效」，这是预期行为——`dsh-rtk` 刻意不声明 `dsh.bundle`（那样会被自动挂到 host 平面、对所有会话生效），而是留到第 2 步按 preset 精细启用。
+
 想从本地检出直接用？软链到组合能解析裸模块名的位置：
 
 ```bash
@@ -102,6 +104,8 @@ agentPresets.copy('standard', 'rtk', 'RTK 优化')
 ```
 
 这一行挂在 **host 平面**同样有效（写进 `~/.dsh/cordis.patch.yml`），会覆盖该部署下的所有会话——但需要重启宿主，而且在 dsh 0.1.5 上，host 行与 preset 行会同时想要同一个进程级 `dsh-rtk` settings 命名空间（0.1.7 按行 id 区分，已无此冲突）。**两个平面只选一个。**
+
+**插件管理器显示「已安装，未生效」？** 那是当前 preset 还没有那一行：包只是普通依赖（未声明 `dsh.bundle` 元数据），只有 preset 行（或 host patch 行）才让它生效。
 
 ## 配置
 

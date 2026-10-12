@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Docs
+
+- The install section now says up front that `dsh plugin add` only installs the
+  package: the plugin manager shows "installed, not active" (「已安装，未生效」)
+  until the step-2 preset row activates it, and that is expected. Both READMEs
+  also carry a troubleshooting line keyed to the GUI's own wording
+  (「已安装，未生效」).
+- Decision on record (2026-10-11): `dsh-rtk` still declares **no** `dsh.bundle`.
+  A bundle patch can only insert a host-plane row, which would activate command
+  rewriting for every session and defeat per-preset opt-in — the plugin stays
+  agent-plane-first, "pick one plane" unchanged.
+
 ## 0.1.2
 
 ### Harness compatibility

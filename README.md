@@ -75,6 +75,8 @@ With `deferToHarnessSpill` on (the default) the plugin turns its own truncation 
 dsh plugin --profile web add @wingsbutterfly/dsh-rtk
 ```
 
+> **This step only installs the package — nothing is active yet.** The plugin manager shows "installed, not active", which is expected: `dsh-rtk` deliberately declares no `dsh.bundle` (that would auto-mount a host-plane row for every session); activation happens per preset in step 2.
+
 Working from a checkout instead? Link it where the composition resolves bare
 specifiers:
 
@@ -103,6 +105,8 @@ agentPresets.copy('standard', 'rtk', 'RTK 优化')
 ```
 
 The row works at the host plane too (add it to `~/.dsh/cordis.patch.yml` instead), which covers every session in the deployment — but that needs a host restart, and on dsh 0.1.5 a host row plus a preset row would both want the same process-global `dsh-rtk` settings namespace (0.1.7 keys settings by row id, so the clash is gone there). Pick one plane.
+
+**Plugin manager says "installed, not active"?** The current preset does not have the row yet: the package is a plain dependency (it declares no `dsh.bundle` metadata) until a preset row (or a host patch row) activates it.
 
 ## Configuration
 
