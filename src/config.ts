@@ -84,7 +84,7 @@ export const DEFAULT_CONFIG: RtkConfig = {
   notifyWhenRtkMissing: true,
   rtkExecutable: 'rtk',
   rewriteTimeoutMs: 3000,
-  compactedTools: ['bash', 'read', 'grep'],
+  compactedTools: ['bash', 'read', 'grep', 'ops_bash', 'ops_grep'],
   outputCompaction: {
     enabled: true,
     stripAnsi: true,

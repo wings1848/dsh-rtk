@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Added
+
+- dsh-ops support: `ops_bash` joins `REWRITABLE_TOOLS` and the default
+  `compactedTools` (`bash`, `read`, `grep`, `ops_bash`, `ops_grep`), so dsh-ops
+  sessions get both command rewriting and output compaction. `ops_grep` reuses
+  the grep summarizer, with one guard: dsh-ops renders its Rust tools as a
+  single `JSON.stringify` line, which the match-list heuristic would mis-read
+  as "1 matches in 1 files" — JSON bodies are therefore left byte-exact.
+
 ### Docs
 
 - The install section now says up front that `dsh plugin add` only installs the

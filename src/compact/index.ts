@@ -218,6 +218,30 @@ function compactGrepText(text: string, compaction: OutputCompactionConfig): Text
 }
 
 /**
+ * Whether a result body is one JSON document.
+ *
+ * dsh-ops renders `ops_grep` (and its other Rust tools) as a single
+ * `JSON.stringify` line. The grep summarizer recognises `path:line:text`
+ * lines and would happily mis-read that one line as a match — every JSON
+ * document contains a colon, so the shape test passes and the output would be
+ * replaced by a bogus "1 matches in 1 files" summary. Structured bodies are
+ * therefore left byte-exact.
+ *
+ * @param text - one text content block.
+ * @returns whether the block parses as a JSON object or array.
+ */
+function isStructuredJson(text: string): boolean {
+  const trimmed = text.trimStart()
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return false
+  try {
+    JSON.parse(trimmed)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
  * Run every enabled technique over one tool result.
  *
  * Returns `changed: false` whenever the result would not actually shrink, so a
@@ -247,9 +271,11 @@ export function compactToolResult(input: CompactionInput, config: RtkConfig): Co
     if (!isTextBlock(block)) return block
 
     let transformed: TextTransform = { text: block.text, techniques: [] }
-    if (input.toolName === 'bash') transformed = compactBashText(block.text, command, compaction)
+    if (input.toolName === 'bash' || input.toolName === 'ops_bash') transformed = compactBashText(block.text, command, compaction)
     else if (input.toolName === 'read') transformed = compactReadText(block.text, args, compaction)
-    else if (input.toolName === 'grep') transformed = compactGrepText(block.text, compaction)
+    else if (input.toolName === 'grep' || input.toolName === 'ops_grep') {
+      transformed = isStructuredJson(block.text) ? { text: block.text, techniques: [] } : compactGrepText(block.text, compaction)
+    }
 
     for (const technique of transformed.techniques) techniques.add(technique)
     originalChunks.push(block.text)

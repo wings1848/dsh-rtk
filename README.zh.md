@@ -121,7 +121,7 @@ agentPresets.copy('standard', 'rtk', 'RTK 优化')
     showRewriteNotifications: false  # 在结果末尾附加一行改写说明
     rtkExecutable: rtk               # 名字或绝对路径
     rewriteTimeoutMs: 3000           # 单次 `rtk rewrite` 的截止时间
-    compactedTools: [bash, read, grep]
+    compactedTools: [bash, read, grep, ops_bash, ops_grep]
     outputCompaction:
       enabled: true
       stripAnsi: true

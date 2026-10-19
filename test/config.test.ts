@@ -9,7 +9,7 @@ describe('normalizeConfig', () => {
     assert.equal(config.enabled, true)
     assert.equal(config.mode, 'rewrite')
     assert.equal(config.guardWhenRtkMissing, true)
-    assert.deepEqual(config.compactedTools, ['bash', 'read', 'grep'])
+    assert.deepEqual(config.compactedTools, ['bash', 'read', 'grep', 'ops_bash', 'ops_grep'])
     assert.equal(config.outputCompaction.enabled, true)
     assert.equal(config.outputCompaction.stripAnsi, true)
     assert.equal(config.outputCompaction.truncate.enabled, true)

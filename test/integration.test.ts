@@ -113,6 +113,27 @@ describe('apply() wiring', () => {
     assert.equal((exec.arguments as { command: string }).command, 'git status', 'the original arguments must be restored')
   })
 
+  it('rewrites a supported command for the dsh-ops bash tool', { skip: rtkSkip }, async () => {
+    const harness = fakeContext()
+    apply(harness.ctx, REWRITE_CONFIG as never)
+
+    const exec = {
+      name: 'ops_bash',
+      callId: 'call-ops',
+      arguments: { command: 'git status', description: 'test' },
+      signal: new AbortController().signal,
+    }
+    let seenByBody: unknown
+    const result = await harness.emit('tools/execute', exec, async () => {
+      seenByBody = (exec.arguments as { command: string }).command
+      return { isError: false, value: 'ok', content: [{ type: 'text', text: 'ok' }] }
+    })
+
+    assert.equal(result.isError, false)
+    assert.match(String(seenByBody), /\brtk git status$/, 'the body must see the rewritten command')
+    assert.equal((exec.arguments as { command: string }).command, 'git status', 'the original arguments must be restored')
+  })
+
   it('leaves an unsupported command untouched', async () => {
     const harness = fakeContext()
     apply(harness.ctx, REWRITE_CONFIG as never)

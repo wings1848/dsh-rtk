@@ -122,7 +122,7 @@ Every field is optional; defaults are shown.
     showRewriteNotifications: false  # append a one-line rewrite note to the result
     rtkExecutable: rtk               # name or absolute path
     rewriteTimeoutMs: 3000           # deadline for one `rtk rewrite` call
-    compactedTools: [bash, read, grep]
+    compactedTools: [bash, read, grep, ops_bash, ops_grep]
     outputCompaction:
       enabled: true
       stripAnsi: true

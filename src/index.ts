@@ -43,8 +43,13 @@ export const inject = ['tools', 'settings']
 
 export { Config }
 
-/** Tools whose `command` argument can be rewritten. */
-const REWRITABLE_TOOLS = new Set(['bash', 'pwsh'])
+/**
+ * Tools whose `command` argument can be rewritten.
+ *
+ * `ops_bash` is dsh-ops' own bash tool: same `command` argument and the same
+ * trailing `[exit code: N]` marker, so it rides the same rewrite path.
+ */
+const REWRITABLE_TOOLS = new Set(['bash', 'pwsh', 'ops_bash'])
 
 /** Path of the rtk history database this plugin scopes rewritten commands to. */
 function rtkHistoryDbPath(): string {

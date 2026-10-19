@@ -139,6 +139,29 @@ describe('per-tool dispatch', () => {
     assert.equal(result.changed, false)
     assert.equal(result.text, noisy)
   })
+
+  it('compacts dsh-ops bash results on the bash path', () => {
+    const result = compact('ops_bash', { command: 'git status' }, bigStatus())
+    assert.equal(result.changed, true)
+    assert.ok(result.techniques.includes('git'))
+  })
+
+  it('groups dsh-ops grep match lines like grep', () => {
+    const result = compact('ops_grep', { pattern: 'const' }, bigGrep())
+    assert.equal(result.changed, true)
+    assert.ok(result.techniques.includes('search'))
+    assert.match(result.text, /40 matches in 4 files/)
+  })
+
+  it('leaves structured dsh-ops grep output byte-exact', () => {
+    const body = JSON.stringify({
+      query: 'const',
+      matches: [{ file: 'src/a.ts', line: 1, text: 'const value = 1' }],
+    })
+    const result = compact('ops_grep', { pattern: 'const' }, body)
+    assert.equal(result.changed, false)
+    assert.equal(result.text, body)
+  })
 })
 
 describe('techniques', () => {
