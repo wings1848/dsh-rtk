@@ -1,0 +1,31 @@
+# dsh-rtk bundle patch
+#
+# This file is the `dsh.bundle.patch` layer of the published npm package. When
+# the plugin is installed through the official CLI —
+#
+#   dsh plugin --profile <name> add @wingsbutterfly/dsh-rtk
+#
+# — the plugin manager reconciles `dsh.profile.bundles` against installed
+# packages and, seeing this declaration, appends `@wingsbutterfly/dsh-rtk` to
+# the bundle stack. The profile boot then merges THIS patch (a single `insert`
+# of the plugin row) exactly like the manual host mount line used before, so no
+# profile file needs editing.
+#
+# Scope: a bundle patch can only append rows to the root entry list. Those rows
+# are instantiated once per host process and their `tools/execute` /
+# `tools/post-execute` listeners are process-global, so this row activates
+# command rewriting and output compaction for EVERY session in the profile — a
+# patch cannot narrow it to one agent preset (it cannot extend
+# `preset-*.config.plugins`). That is the deliberate trade for one-command
+# installation; see README "Per-preset instead of global" for the alternative.
+#
+# The row carries only portable defaults. Machine-specific values such as an
+# absolute `rtkExecutable` belong in the profile's own `cordis.patch.yml` as a
+# non-insert override (`- id: rtk` + a full `config:` block, which replaces the
+# bundle's config wholesale rather than merging it).
+- insert:
+    - id: rtk
+      name: '@wingsbutterfly/dsh-rtk'
+      config:
+        enabled: true
+        mode: rewrite

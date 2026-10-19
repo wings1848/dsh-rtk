@@ -69,13 +69,25 @@
 
 **支持的宿主**：dsh 0.1.5、0.1.7、0.2.0 三代，每代都实测过，证据见 [`docs/verification.md`](docs/verification.md)。Node >= 22.18。
 
-### 1. 安装包
-
+### 安装包
 ```bash
 dsh plugin --profile web add @wingsbutterfly/dsh-rtk
 ```
 
-> **这一步只装包，不生效。** 插件管理器会显示「已安装，未生效」，这是预期行为——`dsh-rtk` 刻意不声明 `dsh.bundle`（那样会被自动挂到 host 平面、对所有会话生效），而是留到第 2 步按 preset 精细启用。
+`dsh-rtk` 声明了 `dsh.bundle`（[`cordis.patch.yml`](cordis.patch.yml)），所以这条命令**装包并挂载**：插件管理器把包追加进 `dsh.profile.bundles`，bundle 层再插入 host 平面的行
+
+```yaml
+- id: rtk
+  name: '@wingsbutterfly/dsh-rtk'
+```
+
+装完重启宿主——profile 行在启动时挂载。
+
+> **作用面：这行在 host 平面，覆盖该 profile 下的所有会话。** 行在宿主进程里只实例化一次，它的 `tools/execute` / `tools/post-execute` 监听器是进程级的：命令改写与输出压缩对该 profile 下的每个 agent、preset、子代理都生效。bundle patch 无法表达「按 preset 精细开启」——patch 只能往根行列表追加行，改不了 `preset-*.config.plugins`。要收窄就用行自带的开关：`enabled: false`，或 `mode: suggest` 只报告不改写。
+
+### 只想按 preset 开
+
+不想要全局，就别走 bundle 通道：把包当普通依赖安装，手工把行加进某个 preset 的插件列表，并让包不出现在 `dsh.profile.bundles` 里（CLI 已加进去就删掉那条）。**两边同时挂会挂载两遍。** 此后插件管理器会显示「已安装，未生效」直到 preset 行存在——这是预期，也是这条提示唯一不表示出问题的情况。
 
 想从本地检出直接用？软链到组合能解析裸模块名的位置：
 
@@ -84,28 +96,21 @@ mkdir -p ~/.dsh/node_modules/@wingsbutterfly
 ln -s /path/to/dsh-rtk ~/.dsh/node_modules/@wingsbutterfly/dsh-rtk
 ```
 
-### 2. 给一个 agent preset 加一行
+### 机器相关配置
 
-`dsh-rtk` 是 **agent 平面**的行：它只往工具管线里注册监听器、不发布任何服务，所以不需要 `isolate` realm。把它加到你希望被优化的 preset：
+随包发布的 patch 只带可移植的默认值。要覆盖绝对路径 `rtkExecutable` 这类值，在 profile 自己的 `cordis.patch.yml` 里写一条**非 insert** 条目。必须写全整个 `config:` 块——patch 对已存在行是整体替换 `config`，不做深合并：
 
 ```yaml
 - id: rtk
-  name: '@wingsbutterfly/dsh-rtk'
   config:
     enabled: true
     mode: rewrite
+    rtkExecutable: /opt/rtk/bin/rtk
 ```
 
-不想动现有 preset，就复制一个再加行：
+### 从手工挂载升级
 
-```
-# 让 cordis preset 的 agent 执行
-agentPresets.copy('standard', 'rtk', 'RTK 优化')
-```
-
-这一行挂在 **host 平面**同样有效（写进 `~/.dsh/cordis.patch.yml`），会覆盖该部署下的所有会话——但需要重启宿主，而且在 dsh 0.1.5 上，host 行与 preset 行会同时想要同一个进程级 `dsh-rtk` settings 命名空间（0.1.7 按行 id 区分，已无此冲突）。**两个平面只选一个。**
-
-**插件管理器显示「已安装，未生效」？** 那是当前 preset 还没有那一行：包只是普通依赖（未声明 `dsh.bundle` 元数据），只有 preset 行（或 host patch 行）才让它生效。
+如果 profile 的 `cordis.patch.yml` 里还留着当年手写的 `- insert:` 行，装上 bundle 后同一行会被挂载两遍。删掉手写 insert 块；需要机器相关配置就只保留上面那条非 insert 覆盖。
 
 ## 配置
 

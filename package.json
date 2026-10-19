@@ -16,6 +16,7 @@
     "lib",
     "src",
     "docs",
+    "cordis.patch.yml",
     "scripts/link-dsh.mjs",
     "README.md",
     "README.zh.md",
@@ -32,6 +33,11 @@
   },
   "bugs": {
     "url": "https://github.com/wings1848/dsh-rtk/issues"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
   },
   "keywords": [
     "deepseek",

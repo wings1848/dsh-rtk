@@ -69,13 +69,39 @@ With `deferToHarnessSpill` on (the default) the plugin turns its own truncation 
 **Supported harness:** dsh 0.1.5, 0.1.7 and 0.2.0 — each verified, evidence in
 [`docs/verification.md`](docs/verification.md). Node >= 22.18.
 
-### 1. Install the package
-
+### Install the package
 ```bash
 dsh plugin --profile web add @wingsbutterfly/dsh-rtk
 ```
 
-> **This step only installs the package — nothing is active yet.** The plugin manager shows "installed, not active", which is expected: `dsh-rtk` deliberately declares no `dsh.bundle` (that would auto-mount a host-plane row for every session); activation happens per preset in step 2.
+`dsh-rtk` declares `dsh.bundle` ([`cordis.patch.yml`](cordis.patch.yml)), so that
+command installs **and mounts** it: the plugin manager appends the package to
+`dsh.profile.bundles`, and the bundle layer inserts the host-plane row
+
+```yaml
+- id: rtk
+  name: '@wingsbutterfly/dsh-rtk'
+```
+
+Restart the host afterwards — profile rows mount at boot.
+
+> **Scope: the mounted row is host-plane, so it covers every session in the
+> profile.** The row is instantiated once per host process and its
+> `tools/execute` / `tools/post-execute` listeners are process-global: command
+> rewriting and output compaction apply to every agent, preset and subagent in
+> that profile. A bundle patch cannot express per-preset opt-in — a patch
+> appends rows to the root list, and the loader cannot extend
+> `preset-*.config.plugins`. Tame the row with its own switches instead:
+> `enabled: false`, or `mode: suggest` to only report the rewrites.
+
+### Per-preset instead of global
+
+Skip the bundle channel when rewriting should cover one preset only: install the
+package as a plain dependency, add the row to that preset's plugin list by hand,
+and keep the package out of `dsh.profile.bundles` (delete the entry if the CLI
+already added it). Do not keep both mounts. The plugin manager then shows
+"installed, not active" until the preset row exists — expected, and the only
+case in which that message is not a problem.
 
 Working from a checkout instead? Link it where the composition resolves bare
 specifiers:
@@ -85,28 +111,26 @@ mkdir -p ~/.dsh/node_modules/@wingsbutterfly
 ln -s /path/to/dsh-rtk ~/.dsh/node_modules/@wingsbutterfly/dsh-rtk
 ```
 
-### 2. Add one row to an agent preset
+### Machine-specific configuration
 
-`dsh-rtk` is an **agent-plane** row: it registers listeners into the tool pipeline and contributes no service, so it needs no `isolate` realm. Add it to the preset whose sessions should be optimized:
+The shipped patch carries portable defaults only. Override values such as an
+absolute `rtkExecutable` in the profile's own `cordis.patch.yml` with a
+**non-insert** entry. It must restate the whole `config:` block, because a patch
+replaces a row's config wholesale rather than merging into it:
 
 ```yaml
 - id: rtk
-  name: '@wingsbutterfly/dsh-rtk'
   config:
     enabled: true
     mode: rewrite
+    rtkExecutable: /opt/rtk/bin/rtk
 ```
 
-To try it without touching an existing preset, copy one and add the row:
+### Upgrading from the manual mount
 
-```
-# ask a cordis-preset agent to run this
-agentPresets.copy('standard', 'rtk', 'RTK 优化')
-```
-
-The row works at the host plane too (add it to `~/.dsh/cordis.patch.yml` instead), which covers every session in the deployment — but that needs a host restart, and on dsh 0.1.5 a host row plus a preset row would both want the same process-global `dsh-rtk` settings namespace (0.1.7 keys settings by row id, so the clash is gone there). Pick one plane.
-
-**Plugin manager says "installed, not active"?** The current preset does not have the row yet: the package is a plain dependency (it declares no `dsh.bundle` metadata) until a preset row (or a host patch row) activates it.
+Installing the bundle while the hand-written `- insert:` row is still in the
+profile's `cordis.patch.yml` mounts the same row twice. Delete the manual insert
+block; keep only the non-insert override above if you need it.
 
 ## Configuration
 

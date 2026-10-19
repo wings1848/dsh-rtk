@@ -4,24 +4,42 @@
 
 ### Added
 
+- `dsh.bundle` metadata (`dsh.bundle.patch` → [`cordis.patch.yml`](cordis.patch.yml)):
+  `dsh plugin --profile <name> add @wingsbutterfly/dsh-rtk` now installs **and**
+  mounts the plugin. The bundle layer inserts the host-plane `rtk` row, the same
+  row the manual `cordis.patch.yml` mount used to require.
 - dsh-ops support: `ops_bash` joins `REWRITABLE_TOOLS` and the default
   `compactedTools` (`bash`, `read`, `grep`, `ops_bash`, `ops_grep`), so dsh-ops
   sessions get both command rewriting and output compaction. `ops_grep` reuses
   the grep summarizer, with one guard: dsh-ops renders its Rust tools as a
   single `JSON.stringify` line, which the match-list heuristic would mis-read
   as "1 matches in 1 files" — JSON bodies are therefore left byte-exact.
+- `test/bundle-manifest.test.ts` pins the manifest contract: the declared patch
+  path, the patch's presence in `files`, and the inserted row's `id`/`name`.
+
+### Changed
+
+- **Scope decision revised (supersedes the 2026-10-11 entry).** A bundle patch
+  can only append rows to the root entry list, and root rows are instantiated
+  once per host process, so the mounted row's `tools/execute` /
+  `tools/post-execute` listeners are process-global: every session in the
+  profile gets rewriting and compaction, with no per-preset opt-in. The previous
+  "declare no `dsh.bundle`, stay agent-plane-first" position bought per-preset
+  opt-in at the cost of a manual mount line and an "installed, not active"
+  plugin-manager state. The bundle is now the default channel because
+  one-command installation is worth more than preset granularity; per-preset
+  use remains possible by skipping the bundle channel and adding the row to a
+  preset by hand (README, "Per-preset instead of global"). `enabled: false`
+  and `mode: suggest` stay the switches that tame the global row — including
+  from a non-insert profile override (`- id: rtk` + full `config:`).
 
 ### Docs
 
-- The install section now says up front that `dsh plugin add` only installs the
-  package: the plugin manager shows "installed, not active" (「已安装，未生效」)
-  until the step-2 preset row activates it, and that is expected. Both READMEs
-  also carry a troubleshooting line keyed to the GUI's own wording
-  (「已安装，未生效」).
-- Decision on record (2026-10-11): `dsh-rtk` still declares **no** `dsh.bundle`.
-  A bundle patch can only insert a host-plane row, which would activate command
-  rewriting for every session and defeat per-preset opt-in — the plugin stays
-  agent-plane-first, "pick one plane" unchanged.
+- The install section now describes the bundle channel: install mounts a
+  host-plane row that covers every session in the profile, and the manual mount
+  line must be deleted when switching (two mounts, one id). Both READMEs also
+  keep the per-preset recipe and the "installed, not active" troubleshooting
+  line for the no-bundle path.
 
 ## 0.1.2
 
