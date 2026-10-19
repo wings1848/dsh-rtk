@@ -117,11 +117,19 @@ describe('/rtk command', () => {
     refreshRuntimeStatus: async () => ({ rtkAvailable: true, rtkExecutablePath: '/usr/bin/rtk' }),
     getMetrics: () => tracker.summary(),
     clearMetrics: () => tracker.clear(),
+    runGain: async (args) => ({ kind: 'success', text: `gain stubbed with args: ${args}` }),
     configLocation: () => 'the `dsh-rtk` namespace',
   })
 
   it('is registered under the name rtk', () => {
     assert.equal(command.name, 'rtk')
+  })
+
+  it('declares an input hint so `/rtk <subcommand>` is routed as a command', () => {
+    assert.equal(typeof command.input.hint, 'string')
+    for (const subcommand of ['show', 'path', 'verify', 'stats', 'gain', 'clear-stats', 'reset', 'help']) {
+      assert.match(command.input.hint, new RegExp(subcommand))
+    }
   })
 
   it('shows configuration and status for no argument or `show`', async () => {
@@ -148,6 +156,7 @@ describe('/rtk command', () => {
       refreshRuntimeStatus: async () => ({ rtkAvailable: false, lastError: 'spawn rtk ENOENT' }),
       getMetrics: () => tracker.summary(),
       clearMetrics: () => {},
+      runGain: async () => ({ kind: 'success', text: '' }),
       configLocation: () => 'x',
     })
     const result = await failing.handler({ rawInput: 'verify' })
@@ -157,6 +166,34 @@ describe('/rtk command', () => {
     assert.match(String(result.text), /brew install rtk/)
     assert.match(String(result.text), /cargo install --git https:\/\/github\.com\/rtk-ai\/rtk/)
     assert.match(String(result.text), /unrelated crate of the same name/, 'the crates.io name collision must be called out')
+  })
+
+  it('forwards `gain` arguments to the rtk ledger query', async () => {
+    const bare = await command.handler({ rawInput: 'gain' })
+    assert.equal(bare.kind, 'success')
+    assert.equal(String(bare.text), 'gain stubbed with args: ')
+
+    const flagged = await command.handler({ rawInput: 'gain -H' })
+    assert.equal(String(flagged.text), 'gain stubbed with args: -H')
+
+    const formatted = await command.handler({ rawInput: '  gain  -f json  ' })
+    assert.equal(String(formatted.text), 'gain stubbed with args: -f json')
+  })
+
+  it('reports a failed `gain` query as an error', async () => {
+    const failing = createRtkCommand({
+      getConfig: () => config,
+      resetConfig: async () => '',
+      getRuntimeStatus: () => ({ rtkAvailable: true }),
+      refreshRuntimeStatus: async () => ({ rtkAvailable: true }),
+      getMetrics: () => ({ calls: 0 }),
+      clearMetrics: () => {},
+      runGain: async () => ({ kind: 'error', text: 'spawn rtk ENOENT' }),
+      configLocation: () => 'x',
+    })
+    const result = await failing.handler({ rawInput: 'gain' })
+    assert.equal(result.kind, 'error')
+    assert.match(String(result.text), /ENOENT/)
   })
 
   it('reports empty stats before anything was compacted', async () => {

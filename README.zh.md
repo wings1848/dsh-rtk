@@ -165,6 +165,7 @@ ln -s /path/to/dsh-rtk ~/.dsh/node_modules/@wingsbutterfly/dsh-rtk
 | `/rtk path` | 配置存放位置 |
 | `/rtk verify` | 检查 rtk 可执行文件是否可用 |
 | `/rtk stats` | 本次会话的压缩收益 |
+| `/rtk gain [flags]` | rtk 自身台账中、本插件改写过命令的收益；`flags` 透传（如 `-H`、`-g`、`-f json`）。查询的是插件隔离的历史数据库，终端里直接跑 `rtk gain` 看到的是另一个全局库 |
 | `/rtk clear-stats` | 重置收益计数 |
 | `/rtk reset` | 恢复配置默认值 |
 | `/rtk help` | 用法说明 |

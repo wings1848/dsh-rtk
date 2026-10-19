@@ -17,6 +17,18 @@ export interface RtkCommandController {
   refreshRuntimeStatus(): Promise<RtkRuntimeStatus>
   getMetrics(): MetricsSummary
   clearMetrics(): void
+  /**
+   * Run `rtk gain` against the plugin's own history database and return its
+   * output.
+   *
+   * Rewritten commands are recorded in an isolated database, so a plain
+   * `rtk gain` in a terminal reports the user's global database and misses
+   * everything this plugin saved. The implementation must therefore pass the
+   * plugin's database through `RTK_DB_PATH`.
+   *
+   * @param args - everything typed after `gain`, already tokenized by the caller.
+   */
+  runGain(args: string): Promise<RtkCommandResult>
   /** Where the user layer of the configuration lives, when it is persisted. */
   configLocation(): string
 }
@@ -49,6 +61,8 @@ const HELP_TEXT = [
   '  /rtk path         where the configuration is stored',
   '  /rtk verify       check whether the rtk executable is usable (prints install options when it is not)',
   '  /rtk stats        compaction savings for this session',
+  '  /rtk gain [flags] rtk\'s own savings ledger for the commands this plugin rewrote',
+  '                     (passes rtk gain flags through, e.g. -H history, -g graph, -f json)',
   '  /rtk clear-stats  reset the savings counters',
   '  /rtk reset        restore configuration defaults',
   '  /rtk help         this text',
@@ -129,13 +143,22 @@ function statsReport(summary: MetricsSummary): string {
 export function createRtkCommand(controller: RtkCommandController): {
   name: string
   description: string
+  /**
+   * Declaring an `input` makes the harness treat `/rtk <subcommand>` as one
+   * command with arguments instead of a chat line. Without it the client only
+   * routes the bare token; anything after the space falls back to the model.
+   */
+  input: { hint: string }
   handler: (invocation: { rawInput: string }) => Promise<RtkCommandResult>
 } {
   return {
     name: 'rtk',
     description: 'RTK command rewriting and output compaction: status, verification, and savings.',
+    input: { hint: 'show | path | verify | stats | gain [flags] | clear-stats | reset | help' },
     async handler(invocation) {
-      const subcommand = invocation.rawInput.trim().split(/\s+/)[0]?.toLowerCase() ?? ''
+      const stripped = invocation.rawInput.trim()
+      const subcommand = stripped.split(/\s+/)[0]?.toLowerCase() ?? ''
+      const rest = stripped.slice(subcommand.length).trim()
 
       switch (subcommand) {
         case '':
@@ -160,6 +183,9 @@ export function createRtkCommand(controller: RtkCommandController): {
 
         case 'stats':
           return { kind: 'success', text: statsReport(controller.getMetrics()) }
+
+        case 'gain':
+          return controller.runGain(rest)
 
         case 'clear-stats':
           controller.clearMetrics()

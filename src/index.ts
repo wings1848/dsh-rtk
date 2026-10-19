@@ -383,6 +383,27 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
       refreshRuntimeStatus,
       getMetrics: () => metrics.summary(),
       clearMetrics: () => metrics.clear(),
+      runGain: async (args) => {
+        const tokens = args.length === 0 ? [] : args.split(/\s+/)
+        const destructive = tokens.find((token) => token === '--reset' || token === '--yes')
+        if (destructive !== undefined) {
+          return {
+            kind: 'error',
+            text: `\`/rtk gain\` refuses \`${destructive}\`: it would erase the ledger. Run \`rtk gain --reset\` yourself if that is intended.`,
+          }
+        }
+        const executable = runtimeStatus.rtkExecutableCommand ?? config.rtkExecutable
+        const result = await runExecutable(executable, ['gain', ...tokens], {
+          timeoutMs: 15000,
+          env: { ...process.env, RTK_DB_PATH: rtkHistoryDbPath() },
+        })
+        const text = [result.stdout, result.stderr]
+          .map((part) => part.trim())
+          .filter((part) => part.length > 0)
+          .join('\n')
+        if (result.code !== 0) return { kind: 'error', text: text || `rtk gain exited with code ${result.code}` }
+        return { kind: 'success', text: text || 'rtk gain printed nothing.' }
+      },
       configLocation: () => bridge.note,
     })
     ctx.effect(() => commands.register(command), 'dsh-rtk.command')

@@ -44,7 +44,7 @@ export function resolverNameFor(platform: NodeJS.Platform): 'where' | 'which' {
 export function runExecutable(
   command: string,
   args: readonly string[],
-  options: { timeoutMs?: number; signal?: AbortSignal } = {},
+  options: { timeoutMs?: number; signal?: AbortSignal; env?: NodeJS.ProcessEnv } = {},
 ): Promise<RtkRunResult> {
   return new Promise((resolve) => {
     execFile(
@@ -54,6 +54,7 @@ export function runExecutable(
         timeout: options.timeoutMs ?? 3000,
         maxBuffer: 4 * 1024 * 1024,
         windowsHide: true,
+        ...(options.env === undefined ? {} : { env: options.env }),
         ...(options.signal === undefined ? {} : { signal: options.signal }),
       },
       (error, stdout, stderr) => {

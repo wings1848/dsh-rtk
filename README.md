@@ -185,6 +185,7 @@ The configuration is also editable live in the harness settings document, and ta
 | `/rtk path` | Where the configuration is stored |
 | `/rtk verify` | Check whether the rtk executable is usable |
 | `/rtk stats` | Compaction savings for this session |
+| `/rtk gain [flags]` | rtk's own savings ledger for the commands this plugin rewrote; `flags` pass through (e.g. `-H`, `-g`, `-f json`). Runs against the plugin's isolated history database, so a plain `rtk gain` in a terminal reports a different, global database |
 | `/rtk clear-stats` | Reset the savings counters |
 | `/rtk reset` | Restore configuration defaults |
 | `/rtk help` | Usage text |

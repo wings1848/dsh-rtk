@@ -4,6 +4,12 @@
 
 ### Added
 
+- `/rtk gain [flags]`: runs `rtk gain` against the plugin's own history database
+  (`RTK_DB_PATH`), so the savings of commands this plugin rewrote are queryable
+  from the command line instead of only by hand-pointing a terminal at
+  `%LOCALAPPDATA%\Temp\dsh-rtk\history.db`. Extra flags pass through
+  (`-H`, `-g`, `-f json`, …); `--reset` and `--yes` are refused because they
+  would erase the ledger.
 - `dsh.bundle` metadata (`dsh.bundle.patch` → [`cordis.patch.yml`](cordis.patch.yml)):
   `dsh plugin --profile <name> add @wingsbutterfly/dsh-rtk` now installs **and**
   mounts the plugin. The bundle layer inserts the host-plane `rtk` row, the same
@@ -16,6 +22,15 @@
   as "1 matches in 1 files" — JSON bodies are therefore left byte-exact.
 - `test/bundle-manifest.test.ts` pins the manifest contract: the declared patch
   path, the patch's presence in `files`, and the inserted row's `id`/`name`.
+
+### Fixed
+
+- `/rtk <subcommand>` was delivered to the model as a chat message: the command
+  definition declared no `input`, and the harness client only routes a
+  space-argument line to a command that declares one (bare `/rtk` worked because
+  it does not need arguments). The definition now carries
+  `input: { hint: 'show | path | verify | stats | clear-stats | reset | help' }`,
+  pinned by a `plugin-surface` test.
 
 ### Changed
 
