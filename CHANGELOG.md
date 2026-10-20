@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Added
+
+- **Display metadata for the Plugin Manager.** The package now ships
+  `locale/en.json` and `locale/zh.json` (`meta.title` / `meta.description`)
+  and an original `icon.svg`, all exported from `package.json`, so the Plugins
+  page shows a real name, description and artwork instead of the bare package id.
+  They are read without activating the plugin, which is why they exist as files
+  rather than as client code.
+- **`prepare` script.** A git-source install now builds `lib/` (TypeScript plus
+  the browser bundle) instead of importing a package with no entry file.
+
 ### Fixed
 
 - **`suggest` mode works again.** It asked rtk for an equivalent only after an
@@ -14,6 +25,10 @@
   variable. Spawns now use the harness's own scrub rule (credential-shaped
   names and `DSH_*` dropped, `PATH`/locale/proxy kept), with the ledger path
   forwarded explicitly.
+- **Peer ranges match the family canonical range.** `peerDependencies` now
+  carry the six-clause range the DSH plugin family publishes, which admits the
+  `0.2.1` line explicitly instead of relying on prerelease matching, and
+  `engines.node` admits Node 22.19+ and 24+ like the rest of the family.
 - **A missing settings service no longer disables the plugin.** `settings` was
   a hard dependency, so a composition without it kept rewriting and compaction
   from ever activating. It is now an upgrade: the plugin starts on the

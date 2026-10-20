@@ -11,13 +11,16 @@
 # of the plugin row) exactly like the manual host mount line used before, so no
 # profile file needs editing.
 #
-# Scope: a bundle patch can only append rows to the root entry list. Those rows
-# are instantiated once per host process and their `tools/execute` /
-# `tools/post-execute` listeners are process-global, so this row activates
-# command rewriting and output compaction for EVERY session in the profile — a
-# patch cannot narrow it to one agent preset (it cannot extend
-# `preset-*.config.plugins`). That is the deliberate trade for one-command
-# installation; see README "Per-preset instead of global" for the alternative.
+# Scope: this patch only inserts a row into the root entry list. A bundle patch
+# could also override an earlier layer's row by `id` (restating the whole
+# `config:` block, because a row's config is replaced wholesale rather than
+# merged), but it cannot reach into an agent preset: extending
+# `preset-*.config.plugins` is not a patch operation. The inserted row is
+# instantiated once per host process and its `tools/execute` /
+# `tools/post-execute` listeners are process-global, so it activates command
+# rewriting and output compaction for EVERY session in the profile — the
+# deliberate trade for one-command installation; see README "Per-preset instead
+# of global" for the alternative.
 #
 # The row carries only portable defaults. Machine-specific values such as an
 # absolute `rtkExecutable` belong in the profile's own `cordis.patch.yml` as a

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, it } from 'node:test'
@@ -41,5 +41,52 @@ describe('bundle manifest', () => {
     // An absolute rtkExecutable baked into the package would only be right on
     // the machine that wrote it; users override it in their profile patch.
     assert.doesNotMatch(patch, /rtkExecutable:\s*[A-Za-z]:\\/)
+  })
+})
+
+/**
+ * Display metadata is read by the Plugin Manager *without activating the
+ * plugin*: a missing `locale/en.json` or icon leaves the row showing a bare
+ * package id and default artwork even though everything works. Those files are
+ * not code, so nothing breaks when they go missing — these cases are the only
+ * guard.
+ */
+describe('display metadata', () => {
+  const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {
+    exports?: Record<string, unknown>
+    files?: string[]
+  }
+
+  for (const language of ['en', 'zh']) {
+    it(`ships locale/${language}.json with a title and a description`, () => {
+      const file = join(root, 'locale', `${language}.json`)
+      assert.ok(existsSync(file), `${file} must exist`)
+      const parsed = JSON.parse(readFileSync(file, 'utf8')) as { meta?: { title?: unknown; description?: unknown } }
+      assert.equal(typeof parsed.meta?.title, 'string')
+      assert.ok(String(parsed.meta?.title).trim().length > 0, 'meta.title must not be empty')
+      assert.equal(typeof parsed.meta?.description, 'string')
+      assert.ok(String(parsed.meta?.description).trim().length > 0, 'meta.description must not be empty')
+    })
+  }
+
+  it('exports the locale dictionary and the icon', () => {
+    const exports = manifest.exports ?? {}
+    assert.ok(Object.hasOwn(exports, './locale/*.json'), 'exports must expose ./locale/*.json')
+    assert.ok(Object.hasOwn(exports, './icon'), 'exports must expose ./icon')
+  })
+
+  it('exports an icon file that is inside the package and under 256 KiB', () => {
+    const icon = join(root, 'icon.svg')
+    assert.ok(existsSync(icon), 'icon.svg must exist at the package root')
+    assert.ok(statSync(icon).size <= 256 * 1024, 'the icon must stay under 256 KiB')
+    const exports = manifest.exports ?? {}
+    assert.equal(exports['./icon'], './icon.svg')
+  })
+
+  it('ships the metadata and every runtime file', () => {
+    const files = manifest.files ?? []
+    for (const required of ['lib', 'locale', 'icon.svg', 'cordis.patch.yml']) {
+      assert.ok(files.includes(required), `files must include ${required}`)
+    }
   })
 })
