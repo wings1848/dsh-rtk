@@ -171,7 +171,7 @@ ln -s /path/to/dsh-rtk ~/.dsh/node_modules/@wingsbutterfly/dsh-rtk
 
 两个监听器都注册在该行被挂载的 scope 里。因此 preset 行恰好覆盖它自己的 agent（preset 的 standing scope 是每个加入它的会话的祖先），而 host 行覆盖进程内所有 agent。
 
-优化本身只需要 `tools` 服务。`settings` 也写进注入，但只是**时序装置**：它异步注册，声明它就能让 Cordis 把本插件挂起等它就位，live 设置集成不会静默落空（完全没有 settings 服务的组合会让这一行一直等着——官方组合都带它）。不认识的 settings 服务只降级为「仅组合配置」，不会弄坏插件。`commands`、`systemPrompt` 用 `ctx.get` 解析，缺了它们的组合依然获得优化。
+优化本身只需要 `tools` 服务。`settings` 是**升级项而非前置依赖**：它异步注册（先读设置文档），所以插件从组合的 `config:` 块起步，服务出现后再换成 live 集成。没有该服务的组合照样改写与压缩，不会被挂起；不认识的 settings 服务只降级为「仅组合配置」，不会弄坏插件。`commands`、`systemPrompt` 用 `ctx.get` 解析，缺了它们的组合依然获得优化。
 
 ### 注意：改写所用的接缝不是官方扩展点
 
@@ -195,6 +195,7 @@ harness 对 `tools/execute` wrapper 的文档原话是「may change only `exec.s
 ## 开发
 
 ```bash
+pnpm install          # 或手工链接 peer 包
 pnpm run typecheck    # 用真实 harness 类型跑 tsc --noEmit
 pnpm test             # 先构建，再跑 node --test test/
 pnpm run build        # 产出 lib/
@@ -203,7 +204,9 @@ pnpm run check        # typecheck + test
 
 测试 import 的是 `lib/`，所以 `pnpm test` 会先构建；否则只改 `src/` 而没构建的回归会静默通过。
 
-`test/integration.test.ts` 用替身上下文驱动真实的 `apply()`，并调用真实的 `rtk` 二进制，所以在没装 rtk 的机器上会失败——这是有意的：重写路径就是这个功能本身。
+`test/integration.test.ts` 用替身上下文驱动真实的 `apply()`，并调用真实的 `rtk` 二进制；没装 rtk 时改写相关用例会被跳过。这个缺口是有意且已记录的：改写决策本身就是功能，用桩只能证明桩是对的。
+
+验收证据——包含独立复核与实测暴露的缺陷——见 [docs/verification.md](docs/verification.md)。
 
 ## Star history
 

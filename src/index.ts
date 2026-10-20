@@ -508,7 +508,9 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
       } catch (error) {
         // A registration that fails must not take the rewriting and compaction
         // halves down with it: the panel then reports the ledger as unavailable.
-        console.warn('[dsh-rtk] gain route was not registered:', error)
+        // Logged through the context logger so the host decides where it lands.
+        const logger = typeof ctx.logger === 'function' ? ctx.logger('dsh-rtk') : undefined
+        logger?.warn('gain route was not registered', error)
         return () => {}
       }
     }, 'dsh-rtk: gain route')

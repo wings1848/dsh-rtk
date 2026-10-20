@@ -192,7 +192,7 @@ Both halves ride the tool pipeline rather than wrapping a tool, because the harn
 
 Both listeners register in the scope the row was mounted into. A preset row therefore covers exactly its own agent (the preset's standing scope is an ancestor of every session that joins it), and a host row covers every agent in the process.
 
-The optimization itself needs only the `tools` service. `settings` is declared too — as a timing device: it registers asynchronously, and declaring it parks the plugin until it appears, so the live-settings integration cannot silently miss it (a composition with no settings service at all parks the row instead; every shipped composition has one). A settings surface of an unknown generation degrades to composition-only configuration rather than breaking the plugin. `commands` and `systemPrompt` are resolved with `ctx.get`, so a composition that omits either still gets the optimization.
+The optimization itself needs only the `tools` service. `settings` is an upgrade, not a prerequisite: it registers asynchronously (it reads the settings document first), so the plugin starts on the composition's `config:` block and swaps in the live integration when the service appears. A composition without that service keeps rewriting and compacting instead of parking the row, and a settings surface of an unknown generation degrades to composition-only configuration rather than breaking the plugin. `commands` and `systemPrompt` are resolved with `ctx.get`, so a composition that omits either still gets the optimization.
 
 ### Caveat: the rewriting seam is not a sanctioned extension point
 
@@ -225,9 +225,9 @@ pnpm run check        # typecheck + test
 
 The tests import `lib/`, so `pnpm test` builds before it runs; a `src/` edit that is never built would otherwise pass the suite unnoticed.
 
-The port's acceptance evidence, including the eight defects later reviews and live testing surfaced, is in [https://github.com/wings1848/dsh-rtk/blob/main/docs/verification.md](https://github.com/wings1848/dsh-rtk/blob/main/docs/verification.md).
+The port's acceptance evidence — including the defects independent review and live testing surfaced — is in [docs/verification.md](docs/verification.md).
 
-`test/integration.test.ts` drives the real `apply()` through a stand-in context and calls the real `rtk` binary, so it fails on a machine without rtk installed — that is intentional: the rewrite path is the feature.
+`test/integration.test.ts` drives the real `apply()` through a stand-in context and calls the real `rtk` binary; its rewrite cases are skipped on a machine without rtk installed. That gap is intentional and documented: the rewrite decision *is* the feature, and a stub would only prove the stub works.
 
 ## Star history
 

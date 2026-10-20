@@ -13,6 +13,38 @@
 - **`prepare` script.** A git-source install now builds `lib/` (TypeScript plus
   the browser bundle) instead of importing a package with no entry file.
 
+### Testing
+
+- **Keyless snapshots of the text the model and the user see.**
+  `test/transcript-snapshot.test.ts` pins a compacted build log (trailing
+  `[exit code: N]` marker included) and the whole `/rtk show` report, so a
+  wording or marker change fails the suite instead of reaching a request.
+- **Contracts that used to be asserted by construction.** Regression cases now
+  cover the `suggest`-mode probe, the child-environment scrub, migration through
+  the real schema (not a hand-built object), the fail-loud budget bounds, the
+  executable write-back rules, the document-relative route and the slot
+  registration inject factory.
+- **Source rules for the browser half.** The suite rejects literal colours,
+  pixel radii, DOM side effects, any `require` beyond `react`, and a `lib/`
+  bundle that differs from `src/`.
+
+### Documentation
+
+- **README (both languages) now describes what the code does.** The settings
+  paragraph describes the late upgrade instead of the old hard dependency, the
+  acceptance-evidence claim is corrected and linked relatively, and the
+  integration-test gap is stated as "skipped without rtk" rather than "fails".
+  The Chinese README gains the install step and the acceptance paragraph it was
+  missing, so the two files stay paired.
+- **`docs/verification.md` gained §17** with this round's environment, the
+  `dsh-plugin-dev check` output before and after, the per-batch test counts, the
+  new regression points and an explicit "not covered" list.
+- **Two Agent Notes** record the two decisions with durable consequences: the
+  unsanctioned `tools/execute` argument rewrite (with the rejected alternatives)
+  and the soft `settings` dependency.
+- **The tag workflow creates the GitHub release** after publishing, idempotently,
+  because the tag is the release-note anchor.
+
 ### Fixed
 
 - **The Configure page and the Host UI rules line up.** The ledger request now

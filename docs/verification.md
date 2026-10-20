@@ -2,7 +2,7 @@
 
 本文件记录 `dsh-rtk` 的**闸门留痕**：每条关于框架行为的断言都配一条可复现命令与实测输出；每个回归测试都留下一次「修复前失败」的记录。
 
-日期：2026-09-12 · 环境：Node v26.7.0 · rtk 0.48.0 · DSH 0.1.5-rc.1
+本文件按小节累积，每节的命令与版本、Node 版本、rtk 版本、DSH 版本都在该节内自证；早期 2026-09 的结论针对当时的宿主，后续小节单独记录换代后的复核（例如 §11 是 0.1.7、§17 是 0.2.1-rc.2）。
 
 ---
 
@@ -143,9 +143,11 @@ $ dsh --profile web --dump-config | grep -A5 "^- id: rtk"
 647:- id: rtk
 648-  name: dsh-rtk
 649-  config:
-650-    enabled: true
-651-    mode: rewrite
+650-    mode: rewrite
 ```
+
+> 2026-10-20 复核：`enabled` 已在配置收敛中移除（`refactor(config)!`），此处旧的
+> dump 片段随之更新；旧字段仍由 `normalizeConfig` 迁移，不再出现在组合结果里。
 
 ### 6.2 命令确实被改写（决定性证据）
 
@@ -546,3 +548,55 @@ pwsh 真机执行、grep 超限时的真实会话 e2e、`/rtk` 命令面与 sett
 - 候选目录只覆盖 WinGet、cargo、scoop 的默认位置；通过 `npm` 安装的 `.cmd` shim 不能直接 `execFile`（Windows 上无 shell 会 EINVAL），因此不在候选内。
 - 自动写入发生在插件激活与每次探测刷新时；若 profile 行位于 home patch（只读），写入被拒，表现为设置项保持原值。
 - 未在运行中的 Web 宿主实机点击验证写回后的表单刷新：宿主需把 checkout 链接进 profile 并重启。
+
+---
+
+## 17. 合规复核与修复（2026-10-20）
+
+**环境**：Node v24.21.0 · DSH 0.2.1-rc.2（桌面宿主）· rtk 0.56.0（WinGet 安装，插件自动探测命中）。
+**方法**：按 `dsh-plugin-guide` `0.3.39` 的红线与官方文档副本逐条核对，先只读审计、再按「运行期正确性 → 交付门禁 → 配置 → 面板 → 文档」五批修复，每批单独提交并跑全量静态检查。
+
+### 17.1 机械检查
+
+```
+$ node bin/dsh-plugin-dev.js check --cwd G:/GitWork/dsh-rtk
+result: OK (9 passed, 0 failed, 2 warned, 5 skipped)
+```
+
+修复前同一命令为 `FAILED (6 passed, 2 failed, 3 warned, 5 skipped)`：失败项是
+`manifest-peers`（四个 `@deepseek-ai/dsh-*` 不是家族规范六子句）与
+`manifest-engines`（`>=22.18.0` 不覆盖 Node 24）；警告项 `display-meta`
+（缺 `locale/*.json` 与图标）随之清零。剩下两条警告是有意保留的：
+五语 README 只做中英双语、`packageManager` 钉在 `pnpm@12.3.4`（lockfile 已按 12 生成）。
+
+### 17.2 回归
+
+```
+$ env -u RTK_DB_PATH node --run check
+ℹ tests 216
+ℹ pass 216
+ℹ fail 0
+```
+
+逐批结果：重构前 203 → 交付元数据 209 → 配置 209 → 面板 216。`RTK_DB_PATH` 必须清除，
+否则宿主注入的隔离库路径会让 `rtk` 相关用例读到另一份台账。
+
+### 17.3 新增的回归点
+
+- `suggest` 模式：探测条件由「仅 rewrite」改为「非 off」，并用
+  `plugin-surface` 固定；此前该模式既不探测也不产出建议，还会误报 rtk 缺失。
+- 子进程环境：新增 `test/child-env.test.ts`，凭据型键名与 `DSH_*` 必须被滤掉、`PATH` 必须保留。
+- 配置迁移：`test/config.test.ts` 改为经 `Config['~standard'].validate` 后再归一化，
+  复现生产路径（校验先填默认值）；越界 `maxChars` 必须有 `issues`。
+- 自动写回：`decideExecutableSetting` 只覆盖插件自有值，且不再写空串。
+- 面板：路由按 `document.baseURI` 解析、reader 走注册的 inject 工厂、无字面色 /
+  无字面圆角 / 无 DOM 越界 / 只 require `react` / `src` 与 `lib` 逐字节一致，
+  全部在 `test/client-bundle.test.ts` 的源码规则组里。
+- 快照：`test/transcript-snapshot.test.ts` 固定模型可见文本（带退出码标记的压缩结果、
+  `/rtk show` 报告），不依赖任何模型 API。
+
+### 17.4 未覆盖
+
+- 仍无真实浏览器渲染验证（明暗主题、窄宽度、焦点态）；面板的路由与样式只做了源码级与 VM 级断言。
+- `tools/execute` 里改写 `exec.arguments` 仍是未文档化接缝（见 README 的同名小节），
+  本轮没有改动它；宿主若提前冻结执行对象，改写会静默失效。
