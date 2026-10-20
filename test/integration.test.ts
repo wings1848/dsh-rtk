@@ -45,6 +45,12 @@ function fakeContext(
       const disposer = callback()
       return typeof disposer === 'function' ? disposer : () => {}
     },
+    // Cordis parks a fiber until its injected services exist; the stand-in does
+    // the same, and only ever hands the callback a context carrying them.
+    inject: (deps: string[], callback: (scoped: any) => unknown) => {
+      if (deps.every((dependency) => services[dependency] !== undefined)) callback(ctx)
+      return {}
+    },
   }
   return {
     ctx,
@@ -94,6 +100,52 @@ describe('apply() wiring', () => {
     apply(harness.ctx, REWRITE_CONFIG as never)
     assert.ok(harness.listeners.has('tools/execute'), 'expected a tools/execute listener')
     assert.ok(harness.listeners.has('tools/post-execute'), 'expected a tools/post-execute listener')
+  })
+
+  it('registers the gain fetch route under the authenticated /api prefix', async () => {
+    const opened: {
+      route?: { path: string; methods: readonly string[]; requestBody: string; fetch: (request: Request) => Promise<Response> }
+    } = {}
+    const connection = {
+      fetch: {
+        register(route: { path: string; methods: readonly string[]; requestBody: string; fetch: (request: Request) => Promise<Response> }) {
+          opened.route = route
+          return () => {}
+        },
+      },
+    }
+    const harness = fakeContext({ connection })
+    apply(harness.ctx, REWRITE_CONFIG as never)
+    assert.equal(opened.route?.path, '/api/dsh-rtk/gain')
+    assert.deepEqual(Array.from(opened.route?.methods ?? []), ['POST'])
+    assert.equal(opened.route?.requestBody, 'buffered')
+
+    // The handler only needs a JSON body; a real Request is unnecessary here.
+    const response = await opened.route?.fetch({ json: async () => ({ range: 'week' }) } as unknown as Request)
+    const body = (await response?.json()) as { ok: boolean; value?: { range: string } }
+    assert.equal(body.ok, true)
+    assert.equal(body.value?.range, 'week')
+
+    const malformed = await opened.route?.fetch({ json: async () => { throw new Error('bad json') } } as unknown as Request)
+    assert.equal(((await malformed?.json()) as { ok: boolean }).ok, true, 'a malformed body falls back to defaults')
+
+    const headless = fakeContext()
+    apply(headless.ctx, REWRITE_CONFIG as never)
+    assert.equal(headless.listeners.has('tools/execute'), true, 'a context without connection still mounts both halves')
+  })
+
+  it('keeps both halves alive when the route registration throws', async () => {
+    const connection = {
+      fetch: {
+        register() {
+          throw new Error('connection: exact Fetch route "/api/dsh-rtk/gain" is already registered')
+        },
+      },
+    }
+    const harness = fakeContext({ connection })
+    apply(harness.ctx, REWRITE_CONFIG as never)
+    assert.ok(harness.listeners.has('tools/execute'), 'a failed route must not take the pipeline down')
+    assert.ok(harness.listeners.has('tools/post-execute'))
   })
 
   it('rewrites a supported command and restores the original afterwards', { skip: rtkSkip }, async () => {
@@ -323,6 +375,7 @@ describe('missing-rtk notice', () => {
     const text = other.content.map((block: { text: string }) => block.text).join('\n')
     assert.match(text, /rtk not found/, 'each session gets told independently')
   })
+
 })
 
 describe('spill coordination', () => {
@@ -361,6 +414,7 @@ describe('spill coordination', () => {
     const text = (decision.content ?? []).map((block: { text: string }) => block.text).join('')
     assert.ok(text.length > 0 && text.length <= 13000, `expected a bounded result, got ${text.length} chars`)
   })
+
 })
 
 describe('settings integration', () => {

@@ -58,6 +58,7 @@ When `dsh-spill-policy` is mounted, it writes a full result to disk and keeps a 
 
 The plugin turns its own truncation off whenever the spill service is present, so a runaway command's output stays readable. Presence is the whole decision — there is no switch.
 
+
 ### Session metrics
 
 `/rtk stats` reports how many characters compaction saved, per tool and per technique.
@@ -159,6 +160,13 @@ The configuration is also editable live in the harness settings document, and ta
 > **Where the row lives decides whether settings are writable (dsh 0.1.7+).** A row in the home patch (`~/.dsh/cordis.patch.yml`) is read-only there: the service refuses writes a lower layer would override, and `/rtk reset` reports that refusal honestly. Put the row in a profile composition to keep live editing.
 
 > **Why `readCompaction` defaults to `none`.** Filtering or truncating a `read` result can leave the model editing against text that no longer matches the file. Everything on by default is lossless for the body text it summarizes, or only fires on outputs whose whole shape is being replaced.
+### Configuration page on the Plugins page
+
+After installing and restarting the Web host, open **Plugins → (this package) → row `rtk` → Configure** for the plugin's own page: the five fields (mode, compaction, character budget, read compaction, rtk executable) with overridden/reset affordances and a read-only notice; a save goes through the host settings service and applies live.
+
+Below the form sits a **Gain** ledger panel. It answers from `rtk gain -d -f json` through the host's exact fetch route `/api/dsh-rtk/gain` (under the Web connection's authenticated `/api` prefix), always with `RTK_DB_PATH` pointed at this plugin's isolated history database — never the terminal's global ledger. The panel slices rtk's daily breakdown into **today / last 7 days / last 30 days / all time**, filters by **workspace** with `rtk gain -p`, and prints the same 20-cell efficiency meter rtk's CLI uses. The workspace picker is the host's own project list (`workspaceRegistry.list()`) and only falls back to the ledger's `project_path` history when that service is absent. A second switch flips the breakdown between **by day** and **by command**: command rows are aggregated read-only from the plugin's `commands` table, because neither the JSON nor the CSV form of `rtk gain` carries a per-command table. The ledger states the figures plainly — **original output**, **after rtk**, **saved (and the share)** — and every column header carries a tooltip explaining the number. Reports are cached for 30 seconds; **Refresh** bypasses the cache. A deployment without a Web connection gets an explicit "ledger unavailable" line instead of a broken page.
+
+The page is the browser half (`exports["./client"]` + `dsh.client`), registered under `package name#row id` (`@wingsbutterfly/dsh-rtk#rtk`). An older install without the client half shows no Configure control; its configuration still applies through the composition `config:` layer and the settings document.
 
 ## Commands
 

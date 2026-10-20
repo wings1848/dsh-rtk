@@ -4,6 +4,39 @@
 
 ### Added
 
+- **Browser half with a row configuration page.** The package now exports
+  `./client` and declares `dsh.client`, so the Web Plugins page shows a
+  **Configure** control on the `rtk` row. The page renders the five fields,
+  stages edits locally, commits them through the host settings service (the same
+  user layer `/rtk reset` clears), and marks overridden fields with a per-field
+  reset.
+- **Gain panel, wired to the ledger.** Below the form, the Configure page now
+  shows what rtk reclaimed: a 20-cell efficiency meter, a ledger of original
+  output / after rtk / saved (with the share), command count and average time,
+  and a breakdown that switches between **by day** and **by command** (the
+  command table is aggregated read-only from the ledger's `commands` table,
+  because neither `rtk gain` format carries one; every column header explains
+  itself through a tooltip). A value is read
+  from `rtk gain -d -f json` on the host, always with `RTK_DB_PATH` pointed at
+  this plugin's isolated history database, and can be sliced by **workspace**
+  (`rtk gain -p`; the picker is the host's `workspaceRegistry.list()`, with the
+  ledger's `project_path` rows as the fallback) and by
+  **time** (today / last 7 days / last 30 days / all time, filtered in UTC to
+  match rtk's own day grouping). The browser reads it through the host's exact
+  fetch route `/api/dsh-rtk/gain`, which the host registers on the connection's
+  authenticated `/api` prefix only when that service exists; a CLI host simply
+  reports the ledger as unavailable. Reports are cached for 30 seconds and the
+  refresh button bypasses the cache.
+- `src/gain.ts` owns that host side: argument shape, UTC window slicing,
+  verbatim-path normalization, read-only `node:sqlite` workspace/command
+  aggregation, and the 30-second report cache. `runExecutable` gained an optional `cwd` so
+  the workspace filter can run `rtk gain` inside the selected project.
+- `test/client-bundle.test.ts` pins the client contract: the
+  `window.__ModuleLoader__.load` wrapper and its package-name id, the
+  `plugins.row.config` registration key `@wingsbutterfly/dsh-rtk#rtk`, the
+  five rendered controls, the workspace/range controls, and the ledger
+  formatters. `test/gain.test.ts` covers the host reader.
+
 - `/rtk gain [flags]`: runs `rtk gain` against the plugin's own history database
   (`RTK_DB_PATH`), so the savings of commands this plugin rewrote are queryable
   from the command line instead of only by hand-pointing a terminal at
@@ -45,6 +78,17 @@
   it does not need arguments). The definition now carries
   `input: { hint: 'show | path | verify | stats | clear-stats | reset | help' }`,
   pinned by a `plugin-surface` test.
+- **Gain panel failed with `HTTP 405`.** The host tried the connection's
+  generic RPC channel (`connection.rpc.handle('/dsh-rtk', …)`), whose route
+  registration reads `webServer` from the *connection service's own* Context —
+  a Context that injects only `credentials`, so the read throws
+  (`cannot get property "webServer" without inject`) and no route is ever
+  installed. `POST /dsh-rtk/gain` then fell through to the SPA fallback, which
+  answers 405. The panel now uses an **exact Fetch route**
+  (`/api/dsh-rtk/gain`) registered through `connection.fetch.register`, the
+  same authenticated `/api` transport the shipped file-upload package uses. A
+  failed registration is logged instead of taking the rewriting and compaction
+  halves down.
 
 ### Changed
 

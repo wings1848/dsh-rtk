@@ -447,6 +447,72 @@ pwsh 真机执行、grep 超限时的真实会话 e2e、`/rtk` 命令面与 sett
 - 旧组合「enabled=true + filtering 关」映射为 `budget`（保字符上限、不碰源码）；旧 `smartTruncate` 用户的丢行行为不复存在。
 - 设置页条目由 26 个控件变为 5 个；字段一旦删除，用户层里残留的旧键不会报错，但也不会再生效。
 
+## 14. 浏览器半边与行配置界面（2026-10-19）
+
+### 14.1 结论
+
+- `package.json` 增加 `exports["./client"]` 与 `dsh.client`（`platform: web`，注入 `dsh-client-locale`、`dsh-client-ui-settings`、`dsh-client-ui-plugin-manager`）；`build` 增加 `scripts/build-client.mjs`，把 `src/client/client.js` 复制为 `lib/client.js`。
+- 客户端按宿主要求交付 ModuleLoader wrapper（`window.__ModuleLoader__.load({ id, factory })`），只 `require("react")`——react 是平台 baseline 模块，无需 `dsh.client.external`。
+- 注册 `plugins.row.config`，键为 `@wingsbutterfly/dsh-rtk#rtk`；表单使用页面注入的 `form`（`state` 快照 + `mutate(ops, revision)`），操作格式 `{ op: 'set' | 'unset', path: [field], value? }`。
+- 收益面板已预留：`GainPanel(gain)` 在无数据时渲染占位说明与 `/rtk stats`、`/rtk gain -H` 提示，并带 `data-rtk-gain="reserved"` 标记；接入远端后只需传数据。
+- 5 个控件与 5 字段一一对应：mode（select）、compact（checkbox）、maxChars（number）、readCompaction（select）、rtkExecutable（text）。
+
+### 14.2 证据
+
+| 标准 | 命令 | 实测 |
+|---|---|---|
+| 类型检查 | `node --run typecheck` | 退出 0、无输出 |
+| 构建产出浏览器半边 | `node --run build` | 输出 `build-client: lib/client.js`，文件存在 |
+| 全量测试 | `node --test test/*.test.ts` | `tests 148 / pass 148 / fail 0` |
+| 客户端契约 | `node --test test/client-bundle.test.ts` | 5 项全过：manifest、wrapper id、slot 键、summary/unavailable、5 控件 + reserved Gain |
+| 仅依赖 baseline react | 测试里的 `require` 桩 | 除 `react` 外的请求直接断言失败 |
+
+### 14.3 已知限制
+
+- **未在运行中的 Web 宿主实机验证渲染**：本机 profile 安装的是已发布 0.1.2 包，checkout 未链接进 profile；实机验证需把 checkout 链接进 profile 并重启宿主，再刷新 Plugins 页。
+- **Gain 数据通道未接**（2026-10-20 已接入：宿主注册精确 fetch 路由 `/api/dsh-rtk/gain`，见第 15 节）：当时需要宿主侧注册远端接口（或等价 API）；客户端 `GainPanel` 的入参形状已预留。
+- 客户端 bundle 为手写交付格式，不走 tsdown；改 UI 时直接改 `src/client/client.js` 并重新构建，契约由 `test/client-bundle.test.ts` 兜底。
+- 设置页条目由 26 个控件变为 5 个；字段一旦删除，用户层里残留的旧键不会报错，但也不会再生效。
+
+## 15. 收益面板接入 rtk 台账（2026-10-20）
+
+### 15.1 结论
+
+- 宿主新增 `src/gain.ts`：执行 `rtk gain -d -f json`，`RTK_DB_PATH` 强制指向本插件隔离库（`%TEMP%\dsh-rtk\history.db`）；选工作区时以该目录为 `cwd` 并追加 `-p`；时间窗按 rtk 的 `daily` 行以 UTC 日期过滤并重算 summary；工作区列表用只读 `node:sqlite` 读 `commands.project_path`（动态导入，取不到就只丢下拉）；报告缓存 30 秒，`refresh` 绕过。
+- `src/index.ts` 在 Web connection 服务存在时，经 `ctx.connection.fetch.register` 注册**精确 fetch 路由** `/api/dsh-rtk/gain`（POST，buffered，返回 `{ ok, value | error }`），走连接带鉴权的 `/api` 前缀；无 connection 的 CLI 宿主不注册，面板显示台账不可用。
+- 通用 RPC 通道（`connection.rpc.handle`）不可用：它用 connection 服务自身 Context 读 `webServer`，而该 Context 只 inject `credentials`，读取直接抛 `cannot get property "webServer" without inject`，路由从未注册 → 请求落到 SPA fallback 得到 HTTP 405。精确 fetch 路由无此依赖，且仓库内 file-upload 包已验证同一通路。
+- `GainPanel` 提供工作区下拉、今日 / 近 7 天 / 近 30 天 / 全部、刷新，渲染五态、20 格效率计量、台账行、数据源脚注，中英双语；客户端用 `fetch('/api/dsh-rtk/gain')` 取数（cookie 随同源请求自动带上），不再依赖客户端 connection 服务。
+- 工作区下拉改取原生 `ctx.workspaceRegistry.list()`（标题+路径，去重后保留标题）；registry 未挂载时才回退到库里的 `project_path` 历史值，避免列出已不存在的旧工程。
+- 明细新增「按天 / 按命令」切换：按命令行由 `src/gain.ts` 的 `readCommands` 从插件库 `commands` 表只读聚合（`rtk <动词>` 归类，含次数/处理前/处理后/省下比例），因为 `rtk gain -f json|csv` 都不含按命令明细；总账仍取 `rtk gain`。
+- 台账文案改为「原始输出 / rtk 处理后 / 省下（占比）」，每日与按命令表格补表头，所有列头与数据格带 `title` tooltip。
+- `runExecutable` 增加可选 `cwd`，供工作区过滤使用；其余行为不变。
+
+### 15.2 证据
+
+| 标准 | 命令 / 方式 | 实测 |
+|---|---|---|
+| 类型检查 | `node --run typecheck` | 退出 0、无输出 |
+| 构建 | `node --run build` | `tsc` 通过，输出 `build-client: lib/client.js` |
+| 全量测试 | `node --run test` | `tests 176 / pass 176 / fail 0` |
+| 宿主读取真实台账 | 临时脚本调用 `createGainReader` | 库为 `%TEMP%\dsh-rtk\history.db`；工作区 34 个（首项 `G:\GitWork\dsh-rtk`，180 条）；近 7 天 556 条 / 163.9K saved / 67.7%；按工作区过滤后 180 条 |
+| 客户端就绪态渲染 | 临时脚本以有状态 React 桩驱动 `GainPanel` | `data-rtk-gain="ready"`，渲染 67.7% 计量、`163.9K`、每日 10-19 / 10-20、数据源路径 |
+| 按命令聚合 | 真实库调用 `readCommands` | 近 7 天：`rtk ls` 233 次/81.7%、`rtk read` 54 次/74.8%、`rtk grep` 189 次/38.5%、`rtk diff` 5 次/94.5% 等，按省下 token 降序 |
+| 工作区来源 | `test/gain.test.ts` → native registry 用例 | registry 有值时 `listWorkspaces` 一次都不调用；verbatim 与普通路径去重为一条，标题保留 |
+| 表格与 tooltip | `test/client-bundle.test.ts` | 按天/按命令表头齐全，`title` 含 `gainTipSavedDay`/`gainTipCallsDay`/`gainTipRatio`；命令视图渲染 `rtk grep` 行；空命令列表给出提示 |
+| 路由注册 | `test/integration.test.ts` | 路由为 `/api/dsh-rtk/gain`、 methods `['POST']`、buffered；handler 回 `{ ok: true, value }`，坏 JSON 回落默认值；没有 connection 时仍挂载两半管线 |
+| 客户端取数 | `test/client-bundle.test.ts` → `fetchGain` | POST `/api/dsh-rtk/gain`，content-type JSON，body 透传；非 2xx 抛 `HTTP <status>` |
+| 405 根因复现 | 真实 cordis + 伪造 connection（`handle` 读缺失的 `webServer`） | 服务属性访问抛 `cannot get property "webServer" without inject`（connection 自身 Context 只 inject credentials）→ 前缀路由从未注册 → SPA fallback 405；改用精确 fetch 路由后无此依赖 |
+| 通路先例 | 宿主的 `@deepseek-ai/dsh-client-file-upload` | 同样用 `ctx.connection.fetch.register({ path: '/api/...', methods: ['POST'], requestBody, fetch })` 注册与鉴权，证明该 API 可用 |
+| 路由实测 | `curl -X POST http://127.0.0.1:<port>/api/dsh-rtk/gain` | 修复前 405（fallback）；重启宿主加载新代码后应为 401（进入 `/api` 鉴权，未带 cookie） |
+
+### 15.3 已知限制
+
+- 时间窗按 UTC 切日，与 rtk 自身的 `daily` 分组一致；本地时区日界附近的记录可能落在相邻日期。
+- 不要回退到 `connection.rpc.handle`：它读 connection 自身 Context 上的 `webServer` 会抛 `without inject`，路由静默缺失、表现为 HTTP 405（由 SPA fallback 回答）。
+- 工作区列表优先用原生 registry；只有 registry 不可用时才回退 `node:sqlite` 读库，此时可能看到已不在侧栏的旧工程。按命令明细始终依赖 `node:sqlite`，取不到就是空表，不影响总账。
+- 面板仍是打开时取数（30 秒缓存），不做实时推送；需要最新数字时按刷新。
+- 未在运行中的 Web 宿主实机点击验证：宿主启动图仍加载 profile 里已发布的 `lib/client.js`，实机核验需把 checkout 链接进 profile 后重启宿主。
+
 ## 16. rtk 路径自动探测与写回设置项（2026-10-20）
 
 ### 16.1 结论

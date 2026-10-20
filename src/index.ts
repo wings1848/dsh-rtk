@@ -1,6 +1,3 @@
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-
 import type { Context } from '@deepseek-ai/cordis'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { PostToolDecision, ToolDispatchExecution, ToolExecution, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
@@ -13,12 +10,23 @@ import { READ_COMPACTION_BANNER_PREFIX, compactToolResult } from './compact/inde
 import { parseBashResult, renderBashResult } from './compact/dsh-result.js'
 import { createMetricsTracker } from './metrics.js'
 import { createRtkCommand } from './command.js'
+import { createGainReader, rtkHistoryDbPath, type GainRequest } from './gain.js'
 import { decideExecutableSetting, fileExists, looksLikeRtkPath, resolveRtkExecutable, runExecutable, type RtkExecutableResolution } from './rtk-executable.js'
 import { applyRtkHistoryScope, resolveRtkRewrite, type ShellKind } from './rtk-rewrite.js'
 import { isStatusStale, shouldRequireRtkAvailability, shouldSkipRewrite, type RtkRuntimeStatus } from './runtime-guard.js'
 
 /** Cordis plugin name used by loader diagnostics. */
 export const name = 'rtk'
+
+/**
+ * Exact browser route for the Gain panel.
+ *
+ * It lives under the connection's authenticated `/api` prefix because that
+ * prefix is the only browser-facing transport the connection service mounts
+ * unconditionally; the generic RPC channel's route registration depends on a
+ * service its own context cannot reach (HTTP 405).
+ */
+const GAIN_ROUTE_PATH = '/api/dsh-rtk/gain'
 
 /**
  * The tool runtime is a hard dependency: both halves of this plugin are
@@ -50,11 +58,6 @@ export { Config }
  * trailing `[exit code: N]` marker, so it rides the same rewrite path.
  */
 const REWRITABLE_TOOLS = new Set(['bash', 'pwsh', 'ops_bash'])
-
-/** Path of the rtk history database this plugin scopes rewritten commands to. */
-function rtkHistoryDbPath(): string {
-  return join(tmpdir(), 'dsh-rtk', 'history.db')
-}
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : undefined
@@ -422,6 +425,90 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
     })
     ctx.effect(() => commands.register(command), 'dsh-rtk.command')
   }
+
+  // ── the browser-facing savings panel ─────────────────────────────────────
+
+  /**
+   * The Configure page's Gain panel reads `rtk gain` from the host over an
+   * exact Fetch route under the Web connection's authenticated `/api` prefix.
+   *
+   * The generic `connection.rpc` channel is not usable here: its handler
+   * registers a prefix route through the connection service's own Context, which
+   * does not inject `webServer`, so `rpc.handle` throws and the request falls
+   * through to the SPA fallback as HTTP 405. Exact Fetch routes have no such
+   * dependency — the `/api` route dispatches them after admission.
+   */
+  const gainReader = createGainReader({
+    executable: () => runtimeStatus.rtkExecutableCommand ?? config.rtkExecutable,
+    database: rtkHistoryDbPath,
+    // Prefer the product's own project list; the ledger only keeps history.
+    workspaceDirectory: () => {
+      const registry = ctx.get('workspaceRegistry') as
+        | { list?: () => readonly { path?: unknown; title?: unknown }[] }
+        | undefined
+      if (registry === undefined || typeof registry.list !== 'function') return undefined
+      const entries: { path: string; title?: string }[] = []
+      for (const entity of registry.list()) {
+        if (typeof entity?.path !== 'string') continue
+        entries.push(typeof entity.title === 'string' ? { path: entity.path, title: entity.title } : { path: entity.path })
+      }
+      return entries
+    },
+  })
+  const registerGainRemote = (scoped: Context): void => {
+    const connection = scoped.get('connection') as
+      | {
+          fetch?: {
+            register(route: {
+              path: string
+              methods: readonly string[]
+              requestBody: string
+              fetch: (request: Request) => Promise<Response>
+            }): () => void
+          }
+        }
+      | undefined
+    const routes = connection?.fetch
+    if (routes === undefined) return
+    scoped.effect(() => {
+      try {
+        return routes.register({
+          path: GAIN_ROUTE_PATH,
+          methods: ['POST'],
+          requestBody: 'buffered',
+          fetch: async (request) => {
+            let payload: unknown = {}
+            try {
+              payload = await request.json()
+            } catch {
+              payload = {}
+            }
+            const want = typeof payload === 'object' && payload !== null ? (payload as GainRequest) : {}
+            try {
+              return Response.json({ ok: true, value: await gainReader.report(want) })
+            } catch (error) {
+              return Response.json({
+                ok: false,
+                error: {
+                  code: 'dsh-rtk/gain',
+                  message: error instanceof Error ? error.message : String(error),
+                  details: {},
+                },
+              })
+            }
+          },
+        })
+      } catch (error) {
+        // A registration that fails must not take the rewriting and compaction
+        // halves down with it: the panel then reports the ledger as unavailable.
+        console.warn('[dsh-rtk] gain route was not registered:', error)
+        return () => {}
+      }
+    }, 'dsh-rtk: gain route')
+  }
+  // `ctx.inject` exists on every real Context; the guard keeps stand-in
+  // contexts (tests) without a service registry alive.
+  if (typeof ctx.inject === 'function') ctx.inject(['connection'], registerGainRemote)
 
   // Fill the executable setting in once per activation, so the configuration
   // page shows where rtk actually lives without waiting for a first command.
