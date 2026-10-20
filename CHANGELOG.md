@@ -15,6 +15,20 @@
 
 ### Fixed
 
+- **The Configure page and the Host UI rules line up.** The ledger request now
+  uses a document-relative route resolved against `document.baseURI` (a
+  root-absolute path breaks a deployment mounted under a prefix); colours come
+  only from `--dsw-alias-*` tokens and radii from `--dsw-radius-*` instead of
+  local pixel values; clearing the executable field to return to auto-detection
+  no longer makes Save permanently invalid; the meter's screen-reader label is
+  translated; the entry-private reader travels through the slot registration's
+  inject factory instead of a wrapper component; the refresh request is consumed
+  once instead of bypassing the cache forever; and the page no longer repeats the
+  title and description the Plugins chrome already draws.
+- **The panel degrades honestly.** A refused reset, an unreachable ledger and a
+  failure detail are all bounded: the detail is truncated to 200 characters, the
+  report cache has a ceiling, and the breakdown query filters its time window in
+  SQL instead of loading the whole table.
 - **Configuration written for the retired schema now migrates.** The loader
   validates the composition's `config:` block before the plugin sees it, which
   fills all five new fields with their schema defaults; the migration treated

@@ -27,7 +27,7 @@ interface Captured {
 }
 
 interface Registration {
-  options: { name: string; key: string; locale: string }
+  options: { name: string; key: string; locale: string; inject?: () => Record<string, unknown> }
   component: (props: Record<string, unknown>) => unknown
 }
 
@@ -51,14 +51,18 @@ function fakeReact(): Record<string, unknown> {
 }
 
 /** Load the built bundle and return its exports. */
-function loadClient(): {
+function loadClient(globals: Record<string, unknown> = {}): {
   exports: Record<string, unknown>
   captured: Captured
   react: Record<string, unknown>
 } {
   const source = readFileSync(join(root, 'lib', 'client.js'), 'utf8')
   let captured: Captured | undefined
-  const sandbox = { window: { __ModuleLoader__: { load: (entry: Captured) => { captured = entry } } } }
+  const sandbox = {
+    URL,
+    ...globals,
+    window: { __ModuleLoader__: { load: (entry: Captured) => { captured = entry } } },
+  }
   vm.runInNewContext(source, sandbox, { filename: 'lib/client.js' })
   assert.ok(captured !== undefined, 'the bundle must register itself with window.__ModuleLoader__')
   const react = fakeReact()
@@ -148,6 +152,15 @@ describe('client bundle', () => {
     assert.equal(registration?.options.locale, exports['NS'])
   })
 
+  it('hands the component its reader through the registration inject factory', () => {
+    const { exports } = loadClient()
+    const { registrations } = mount(exports)
+    const inject = registrations[0]?.options.inject
+    assert.equal(typeof inject, 'function', 'entry-private props belong in the registration inject factory')
+    const injected = (inject as () => Record<string, unknown>)()
+    assert.equal(typeof injected['gainReader'], 'function', 'the Gain panel reader must arrive through inject')
+  })
+
   it('renders a summary line and an unavailable notice without a form', () => {
     const { exports } = loadClient()
     const { registrations } = mount(exports)
@@ -175,6 +188,7 @@ describe('client bundle', () => {
         },
         mutate: async () => true,
       },
+      gainReader: async () => ({ ok: true, value: { available: false } }),
     })
     const nodes = elements(tree)
     const byData = (key: string) => nodes.find((node) => node.props[key] !== undefined)
@@ -286,20 +300,36 @@ describe('client bundle', () => {
     assert.equal(short('C:'), 'C:')
   })
 
+  it('resolves the ledger route against the document base URI', async () => {
+    const { exports } = loadClient({ document: { baseURI: 'http://127.0.0.1:9/harness/' } })
+    const fetchGain = exports['fetchGain'] as (
+      payload: unknown,
+      doFetch: (url: string) => Promise<unknown>,
+    ) => Promise<unknown>
+    let seen = ''
+    await fetchGain({}, async (url: string) => {
+      seen = url
+      return { ok: true, json: async () => ({ ok: true, value: {} }) }
+    })
+    assert.equal(seen, 'http://127.0.0.1:9/harness/api/dsh-rtk/gain')
+  })
+
   it('posts the ledger request to the host fetch route', async () => {
     const { exports } = loadClient()
     const fetchGain = exports['fetchGain'] as (
       payload: unknown,
       doFetch: (url: string, init: { method: string; headers: Record<string, string>; body: string }) => Promise<unknown>,
     ) => Promise<unknown>
-    assert.equal(exports['GAIN_PATH'], '/api/dsh-rtk/gain')
+    // Document-relative on purpose: a root-absolute path breaks a deployment
+    // mounted under a prefix.
+    assert.equal(exports['GAIN_PATH'], 'api/dsh-rtk/gain')
 
     let seen: { url: string; init?: { method?: string; headers?: Record<string, string>; body?: string } } = { url: '' }
     const result = (await fetchGain({ range: 'week' }, async (url, init) => {
       seen = { url, init }
       return { ok: true, json: async () => ({ ok: true, value: { range: 'week' } }) }
     })) as { ok: boolean; value: { range: string } }
-    assert.equal(seen.url, '/api/dsh-rtk/gain')
+    assert.equal(seen.url, 'api/dsh-rtk/gain', 'without a document the route is used as written')
     assert.equal(seen.init?.method, 'POST')
     assert.equal(seen.init?.headers?.['content-type'], 'application/json')
     assert.equal(JSON.parse(String(seen.init?.body)).range, 'week')
@@ -367,5 +397,43 @@ describe('client bundle', () => {
     const gain = rendered.find((node) => node.props['data-rtk-gain'] !== undefined)
     assert.equal(gain?.props['data-rtk-gain'], 'loading')
     assert.ok(JSON.stringify(rendered).includes('gainLoading'))
+  })
+})
+
+/**
+ * The browser half is reviewable only against the host's UI rules: no literal
+ * palette values, no off-scale radii, no DOM side effects, and no second
+ * application mounted on the page. These are source-level rules, so they are
+ * pinned at the source level rather than through the VM.
+ */
+describe('browser half source rules', () => {
+  const source = readFileSync(join(root, 'src', 'client', 'client.js'), 'utf8')
+
+  it('uses no literal colors', () => {
+    assert.doesNotMatch(source, /#[0-9a-fA-F]{3,8}\b/, 'colors must come from --dsw-alias-* tokens')
+    assert.doesNotMatch(source, /\brgba?\(/, 'colors must come from --dsw-alias-* tokens')
+  })
+
+  it('uses the documented radius tokens instead of pixel values', () => {
+    assert.doesNotMatch(source, /borderRadius: '\d/, 'radii must come from --dsw-radius-* tokens')
+  })
+
+  it('never writes outside its slot', () => {
+    for (const banned of ['document.body', 'createPortal', 'innerHTML', 'localStorage', 'iframe']) {
+      assert.equal(source.includes(banned), false, `${banned} is not allowed in a slot component`)
+    }
+  })
+
+  it('requests nothing but baseline react', () => {
+    const requires = [...source.matchAll(/require\('([^']+)'\)/g)].map((match) => match[1])
+    assert.deepEqual(requires, ['react'])
+  })
+
+  it('keeps the built bundle identical to its source', () => {
+    assert.equal(
+      readFileSync(join(root, 'lib', 'client.js'), 'utf8'),
+      source,
+      'scripts/build-client.mjs must copy src/client/client.js verbatim',
+    )
   })
 })

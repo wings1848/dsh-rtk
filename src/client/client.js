@@ -58,6 +58,7 @@ window.__ModuleLoader__.load({
       gainLoading: '读取台账中…',
       gainRate: '节省率',
       gainRateCaption: '原始 token 中被 rtk 省掉的比例，越大越省',
+      gainMeterAria: '节省率计量条',
       gainBefore: '原始输出',
       gainAfter: 'rtk 处理后',
       gainSaved: '省下',
@@ -148,6 +149,7 @@ window.__ModuleLoader__.load({
       gainLoading: 'Reading the ledger…',
       gainRate: 'Saved',
       gainRateCaption: 'Share of the original tokens rtk kept out of context; higher is better',
+      gainMeterAria: 'Savings meter',
       gainBefore: 'Original output',
       gainAfter: 'After rtk',
       gainSaved: 'Saved',
@@ -231,13 +233,12 @@ window.__ModuleLoader__.load({
     const style = {
       form: { display: 'grid', gap: '14px', maxWidth: '560px' },
       heading: { margin: '0 0 2px', fontSize: '14px', fontWeight: 600, color: 'var(--dsw-alias-label-primary, inherit)' },
-      intro: { margin: 0, fontSize: '12.5px', lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary, #8a8a8a)' },
       field: { display: 'grid', gap: '4px' },
       row: { display: 'flex', alignItems: 'center', gap: '8px' },
       label: { fontSize: '13px', fontWeight: 500, color: 'var(--dsw-alias-label-primary, inherit)' },
-      hint: { margin: 0, fontSize: '12px', lineHeight: '17px', color: 'var(--dsw-alias-label-tertiary, #8a8a8a)' },
-      detail: { margin: 0, fontSize: '11.5px', lineHeight: '16px', color: 'var(--dsw-alias-label-tertiary, #8a8a8a)', opacity: 0.9 },
-      badge: { fontSize: '11px', padding: '0 5px', borderRadius: '4px', background: 'var(--dsw-alias-bg-layer-3, #f1f1f1)', color: 'var(--dsw-alias-label-secondary, inherit)' },
+      hint: { margin: 0, fontSize: '12px', lineHeight: '17px', color: 'var(--dsw-alias-label-tertiary)' },
+      detail: { margin: 0, fontSize: '11.5px', lineHeight: '16px', color: 'var(--dsw-alias-label-tertiary)', opacity: 0.9 },
+      badge: { fontSize: '11px', padding: '0 5px', borderRadius: 'var(--dsw-radius-xs)', background: 'var(--dsw-alias-bg-layer-3)', color: 'var(--dsw-alias-label-secondary, inherit)' },
       linkButton: { background: 'none', border: 'none', padding: 0, font: 'inherit', fontSize: '11.5px', cursor: 'pointer', color: 'var(--dsw-alias-label-secondary, inherit)', textDecoration: 'underline' },
       input: {
         boxSizing: 'border-box',
@@ -248,20 +249,20 @@ window.__ModuleLoader__.load({
         fontSize: '13px',
         color: 'inherit',
         background: 'var(--dsw-alias-bg-layer-1, transparent)',
-        border: '0.5px solid var(--dsw-alias-border-l3, #d0d0d0)',
-        borderRadius: '6px',
+        border: '0.5px solid var(--dsw-alias-border-l3)',
+        borderRadius: 'var(--dsw-radius-md)',
       },
-      checkbox: { width: '16px', height: '16px', accentColor: 'var(--dsw-alias-state-business-primary, #1677ff)' },
+      checkbox: { width: '16px', height: '16px', accentColor: 'var(--dsw-alias-state-business-primary)' },
       actions: { display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px' },
       primary: {
         height: '30px',
         padding: '0 12px',
         font: 'inherit',
         fontSize: '13px',
-        color: '#fff',
-        background: 'var(--dsw-alias-state-business-primary, #1677ff)',
+        color: 'var(--dsw-alias-label-primary-inverted, inherit)',
+        background: 'var(--dsw-alias-state-business-primary)',
         border: '0',
-        borderRadius: '6px',
+        borderRadius: 'var(--dsw-radius-md)',
         cursor: 'pointer',
       },
       secondary: {
@@ -271,17 +272,17 @@ window.__ModuleLoader__.load({
         fontSize: '13px',
         color: 'inherit',
         background: 'transparent',
-        border: '0.5px solid var(--dsw-alias-border-l3, #d0d0d0)',
-        borderRadius: '6px',
+        border: '0.5px solid var(--dsw-alias-border-l3)',
+        borderRadius: 'var(--dsw-radius-md)',
         cursor: 'pointer',
       },
-      status: { margin: 0, fontSize: '12px', color: 'var(--dsw-alias-label-tertiary, #8a8a8a)' },
-      error: { margin: 0, fontSize: '12px', color: 'var(--dsw-alias-state-error-primary, #d9534f)' },
+      status: { margin: 0, fontSize: '12px', color: 'var(--dsw-alias-label-tertiary)' },
+      error: { margin: 0, fontSize: '12px', color: 'var(--dsw-alias-state-error-primary)' },
       gain: {
         marginTop: '4px',
         padding: '14px 16px 12px',
-        border: '0.5px solid var(--dsw-alias-border-l3, #d0d0d0)',
-        borderRadius: '10px',
+        border: '0.5px solid var(--dsw-alias-border-l3)',
+        borderRadius: 'var(--dsw-radius-xl)',
         background: 'var(--dsw-alias-bg-layer-1, transparent)',
         display: 'grid',
         gap: '12px',
@@ -294,7 +295,7 @@ window.__ModuleLoader__.load({
         lineHeight: '14px',
         letterSpacing: '0.09em',
         textTransform: 'uppercase',
-        color: 'var(--dsw-alias-label-tertiary, #8a8a8a)',
+        color: 'var(--dsw-alias-label-tertiary)',
       },
       gainSelect: {
         boxSizing: 'border-box',
@@ -305,15 +306,15 @@ window.__ModuleLoader__.load({
         fontSize: '12px',
         color: 'inherit',
         background: 'var(--dsw-alias-bg-layer-1, transparent)',
-        border: '0.5px solid var(--dsw-alias-border-l3, #d0d0d0)',
-        borderRadius: '6px',
+        border: '0.5px solid var(--dsw-alias-border-l3)',
+        borderRadius: 'var(--dsw-radius-md)',
       },
       segmented: {
         display: 'inline-flex',
         gap: '2px',
         padding: '2px',
-        background: 'var(--dsw-alias-bg-layer-3, #f1f1f1)',
-        borderRadius: '7px',
+        background: 'var(--dsw-alias-bg-layer-3)',
+        borderRadius: 'var(--dsw-radius-md)',
       },
       seg: {
         height: '26px',
@@ -323,7 +324,7 @@ window.__ModuleLoader__.load({
         color: 'var(--dsw-alias-label-secondary, inherit)',
         background: 'transparent',
         border: '0',
-        borderRadius: '5px',
+        borderRadius: 'var(--dsw-radius-sm)',
         cursor: 'pointer',
       },
       segActive: {
@@ -332,11 +333,11 @@ window.__ModuleLoader__.load({
         font: 'inherit',
         fontSize: '12px',
         color: 'var(--dsw-alias-label-primary, inherit)',
-        background: 'var(--dsw-alias-bg-layer-1, #fff)',
+        background: 'var(--dsw-alias-bg-layer-1)',
         border: '0',
-        borderRadius: '5px',
+        borderRadius: 'var(--dsw-radius-sm)',
         cursor: 'pointer',
-        boxShadow: '0 0 0 0.5px var(--dsw-alias-border-l3, #d0d0d0)',
+        boxShadow: '0 0 0 0.5px var(--dsw-alias-border-l3)',
       },
       gainRefresh: {
         height: '30px',
@@ -345,8 +346,8 @@ window.__ModuleLoader__.load({
         fontSize: '12px',
         color: 'inherit',
         background: 'transparent',
-        border: '0.5px solid var(--dsw-alias-border-l3, #d0d0d0)',
-        borderRadius: '6px',
+        border: '0.5px solid var(--dsw-alias-border-l3)',
+        borderRadius: 'var(--dsw-radius-md)',
         cursor: 'pointer',
       },
       readout: { display: 'flex', alignItems: 'flex-end', gap: '18px', flexWrap: 'wrap' },
@@ -360,29 +361,29 @@ window.__ModuleLoader__.load({
         letterSpacing: '-0.02em',
         color: 'var(--dsw-alias-label-primary, inherit)',
       },
-      bigUnit: { fontSize: '18px', lineHeight: '1', fontWeight: 500, color: 'var(--dsw-alias-label-tertiary, #8a8a8a)' },
+      bigUnit: { fontSize: '18px', lineHeight: '1', fontWeight: 500, color: 'var(--dsw-alias-label-tertiary)' },
       bigLabel: {
         marginLeft: '8px',
         fontSize: '10.5px',
         letterSpacing: '0.09em',
         textTransform: 'uppercase',
-        color: 'var(--dsw-alias-label-tertiary, #8a8a8a)',
+        color: 'var(--dsw-alias-label-tertiary)',
       },
       meterBlock: { display: 'grid', gap: '4px', flex: '1 1 220px' },
       meter: { display: 'flex', gap: '2px', height: '14px' },
-      meterOn: { flex: '1', background: 'var(--dsw-alias-state-business-primary, #1677ff)', borderRadius: '1px' },
-      meterOff: { flex: '1', background: 'var(--dsw-alias-bg-layer-3, #ececec)', borderRadius: '1px' },
-      meterCaption: { margin: 0, fontSize: '11px', lineHeight: '15px', color: 'var(--dsw-alias-label-tertiary, #8a8a8a)' },
-      ledger: { display: 'grid', gap: '6px', paddingTop: '10px', borderTop: '0.5px solid var(--dsw-alias-border-l3, #d0d0d0)' },
+      meterOn: { flex: '1', background: 'var(--dsw-alias-state-business-primary)', borderRadius: 'var(--dsw-radius-xs)' },
+      meterOff: { flex: '1', background: 'var(--dsw-alias-bg-layer-3)', borderRadius: 'var(--dsw-radius-xs)' },
+      meterCaption: { margin: 0, fontSize: '11px', lineHeight: '15px', color: 'var(--dsw-alias-label-tertiary)' },
+      ledger: { display: 'grid', gap: '6px', paddingTop: '10px', borderTop: '0.5px solid var(--dsw-alias-border-l3)' },
       ledgerRow: { display: 'flex', alignItems: 'baseline', gap: '6px', fontSize: '12.5px', lineHeight: '18px' },
       ledgerLabel: { color: 'var(--dsw-alias-label-secondary, inherit)' },
-      ledgerLeader: { flex: '1', borderBottom: '1px dotted var(--dsw-alias-border-l3, #c8c8c8)', transform: 'translateY(-3px)' },
+      ledgerLeader: { flex: '1', borderBottom: '1px dotted var(--dsw-alias-border-l3)', transform: 'translateY(-3px)' },
       ledgerValue: {
         fontFamily: MONO,
         fontVariantNumeric: 'tabular-nums',
         color: 'var(--dsw-alias-label-primary, inherit)',
       },
-      daily: { display: 'grid', gap: '5px', paddingTop: '10px', borderTop: '0.5px solid var(--dsw-alias-border-l3, #d0d0d0)' },
+      daily: { display: 'grid', gap: '5px', paddingTop: '10px', borderTop: '0.5px solid var(--dsw-alias-border-l3)' },
       dayRow: {
         display: 'grid',
         gridTemplateColumns: '44px 1fr 62px 44px',
@@ -391,14 +392,14 @@ window.__ModuleLoader__.load({
         fontSize: '11.5px',
         lineHeight: '16px',
       },
-      dayDate: { fontFamily: MONO, color: 'var(--dsw-alias-label-tertiary, #8a8a8a)' },
-      dayTrack: { height: '6px', background: 'var(--dsw-alias-bg-layer-3, #ececec)', borderRadius: '3px', overflow: 'hidden' },
+      dayDate: { fontFamily: MONO, color: 'var(--dsw-alias-label-tertiary)' },
+      dayTrack: { height: '6px', background: 'var(--dsw-alias-bg-layer-3)', borderRadius: 'var(--dsw-radius-xs)', overflow: 'hidden' },
       dayFill: {
         display: 'block',
         height: '100%',
-        background: 'var(--dsw-alias-state-business-primary, #1677ff)',
+        background: 'var(--dsw-alias-state-business-primary)',
         opacity: 0.85,
-        borderRadius: '3px',
+        borderRadius: 'var(--dsw-radius-xs)',
       },
       dayValue: {
         fontFamily: MONO,
@@ -406,7 +407,7 @@ window.__ModuleLoader__.load({
         textAlign: 'right',
         color: 'var(--dsw-alias-label-secondary, inherit)',
       },
-      dayCount: { fontFamily: MONO, textAlign: 'right', color: 'var(--dsw-alias-label-tertiary, #8a8a8a)' },
+      dayCount: { fontFamily: MONO, textAlign: 'right', color: 'var(--dsw-alias-label-tertiary)' },
       breakdownHead: {
         display: 'flex',
         alignItems: 'center',
@@ -418,8 +419,8 @@ window.__ModuleLoader__.load({
         display: 'inline-flex',
         gap: '2px',
         padding: '2px',
-        background: 'var(--dsw-alias-bg-layer-3, #f1f1f1)',
-        borderRadius: '6px',
+        background: 'var(--dsw-alias-bg-layer-3)',
+        borderRadius: 'var(--dsw-radius-md)',
       },
       segSmall: {
         height: '22px',
@@ -429,7 +430,7 @@ window.__ModuleLoader__.load({
         color: 'var(--dsw-alias-label-secondary, inherit)',
         background: 'transparent',
         border: '0',
-        borderRadius: '4px',
+        borderRadius: 'var(--dsw-radius-xs)',
         cursor: 'pointer',
       },
       segSmallActive: {
@@ -438,18 +439,18 @@ window.__ModuleLoader__.load({
         font: 'inherit',
         fontSize: '11.5px',
         color: 'var(--dsw-alias-label-primary, inherit)',
-        background: 'var(--dsw-alias-bg-layer-1, #fff)',
+        background: 'var(--dsw-alias-bg-layer-1)',
         border: '0',
-        borderRadius: '4px',
+        borderRadius: 'var(--dsw-radius-xs)',
         cursor: 'pointer',
-        boxShadow: '0 0 0 0.5px var(--dsw-alias-border-l3, #d0d0d0)',
+        boxShadow: '0 0 0 0.5px var(--dsw-alias-border-l3)',
       },
       tableHead: {
         fontSize: '10.5px',
         lineHeight: '14px',
         letterSpacing: '0.06em',
         textTransform: 'uppercase',
-        color: 'var(--dsw-alias-label-tertiary, #8a8a8a)',
+        color: 'var(--dsw-alias-label-tertiary)',
         whiteSpace: 'nowrap',
       },
       tableHeadRight: {
@@ -457,7 +458,7 @@ window.__ModuleLoader__.load({
         lineHeight: '14px',
         letterSpacing: '0.06em',
         textTransform: 'uppercase',
-        color: 'var(--dsw-alias-label-tertiary, #8a8a8a)',
+        color: 'var(--dsw-alias-label-tertiary)',
         textAlign: 'right',
         whiteSpace: 'nowrap',
       },
@@ -497,10 +498,10 @@ window.__ModuleLoader__.load({
       source: {
         margin: 0,
         paddingTop: '10px',
-        borderTop: '0.5px solid var(--dsw-alias-border-l3, #d0d0d0)',
+        borderTop: '0.5px solid var(--dsw-alias-border-l3)',
         fontSize: '11px',
         lineHeight: '15px',
-        color: 'var(--dsw-alias-label-tertiary, #8a8a8a)',
+        color: 'var(--dsw-alias-label-tertiary)',
         wordBreak: 'break-all',
       },
       sourceMono: { fontFamily: MONO },
@@ -536,15 +537,20 @@ window.__ModuleLoader__.load({
       return current === next
     }
 
-    /** Every invalid field, so Save can stay disabled with a reason. */
+    /**
+     * Every invalid field, so Save can stay disabled with a reason.
+     *
+     * Only numbers are checked here. An empty text value is meaningful: the
+     * executable field treats it as "auto-detect", and clearing a detected path
+     * has to stay possible. Anything the host schema rejects comes back as a
+     * write failure the form reports.
+     */
     function invalidFields(draft) {
       const invalid = []
       for (const field of FIELDS) {
-        if (field.kind === 'number') {
-          const parsed = Number.parseInt(String(draft[field.key]), 10)
-          if (!Number.isFinite(parsed) || parsed < field.min || parsed > field.max) invalid.push(field.key)
-        }
-        if (field.kind === 'text' && String(draft[field.key]).trim() === '') invalid.push(field.key)
+        if (field.kind !== 'number') continue
+        const parsed = Number.parseInt(String(draft[field.key]), 10)
+        if (!Number.isFinite(parsed) || parsed < field.min || parsed > field.max) invalid.push(field.key)
       }
       return invalid
     }
@@ -618,11 +624,8 @@ window.__ModuleLoader__.load({
       for (let index = 0; index < 20; index += 1) {
         cells.push(h('span', { key: 'cell-' + index, style: index < filled ? style.meterOn : style.meterOff }))
       }
-      return h(
-        'div',
-        { style: style.meter, role: 'img', 'aria-label': formatPercent(props.percent) + '% saved' },
-        cells,
-      )
+      const label = props.t('gainMeterAria') + ' ' + formatPercent(props.percent) + '%'
+      return h('div', { style: style.meter, role: 'img', 'aria-label': label }, cells)
     }
 
     /** The ready state: headline rate, ledger rows, and the chosen breakdown table. */
@@ -760,7 +763,7 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { style: style.meterBlock },
-            h(GainMeter, { percent: summary.savingsPercent }),
+            h(GainMeter, { t, percent: summary.savingsPercent }),
             h('p', { style: style.meterCaption }, t('gainRateCaption')),
           ),
         ),
@@ -807,16 +810,18 @@ window.__ModuleLoader__.load({
             if (cancelled) return
             if (result === undefined || result === null || result.ok !== true) {
               const message = result !== null && result !== undefined && result.error !== undefined ? result.error.message : ''
-              setState((current) => ({ ...current, status: 'error', error: message }))
+              setState((current) => ({ ...current, status: 'error', error: message, reload: 0 }))
               return
             }
             const report = result.value
             if (report === null || report === undefined || report.available !== true) {
               const reason = report !== null && report !== undefined && report.reason !== undefined ? report.reason : ''
-              setState((current) => ({ ...current, status: 'unavailable', data: report, error: reason }))
+              setState((current) => ({ ...current, status: 'unavailable', data: report, error: reason, reload: 0 }))
               return
             }
-            setState((current) => ({ ...current, status: 'ready', data: report, error: '' }))
+            // Consuming the counter keeps "refresh" a single bypass: later
+            // range/workspace changes go back to the host's short cache.
+            setState((current) => ({ ...current, status: 'ready', data: report, error: '', reload: 0 }))
           },
           (failure) => {
             if (cancelled) return
@@ -824,6 +829,7 @@ window.__ModuleLoader__.load({
               ...current,
               status: 'error',
               error: failure instanceof Error ? failure.message : String(failure),
+              reload: 0,
             }))
           },
         )
@@ -1073,9 +1079,8 @@ window.__ModuleLoader__.load({
       return h(
         'div',
         { style: style.form, 'data-rtk-config': 'form' },
-        h('h3', { style: style.heading }, t('title')),
-        h('p', { style: style.intro }, t('description')),
-        state.value === undefined && state.status !== undefined ? h('p', { style: style.status }, t('loading')) : null,
+        state.status === 'loading' ? h('p', { style: style.status }, t('loading')) : null,
+        state.status === 'unavailable' ? h('p', { style: style.status }, t('unavailable')) : null,
         readOnly ? h('p', { style: style.status }, t('readOnly')) : null,
         ...fields,
         h(
@@ -1100,14 +1105,24 @@ window.__ModuleLoader__.load({
     /** Required services (cordis fiber inject). */
     const inject = ['slots', 'locale']
 
-    /** Exact fetch route the host registers under the connection's authenticated /api prefix. */
-    const GAIN_PATH = '/api/dsh-rtk/gain'
+    /**
+     * Exact fetch route the host registers under the connection's authenticated
+     * `/api` prefix.
+     *
+     * Deliberately has no leading slash: the host resolves client resources
+     * relative to the served document, so a root-absolute path breaks a
+     * deployment mounted under a prefix. `fetchGain` anchors it to
+     * `document.baseURI` before sending.
+     */
+    const GAIN_PATH = 'api/dsh-rtk/gain'
 
     /**
      * Read the ledger through the host's exact fetch route.
      *
      * The route lives under the connection's authenticated `/api` prefix, so the
-     * browser's cookie rides along automatically — the panel keeps no token.
+     * browser's cookie rides along automatically — the panel keeps no token. The
+     * URL is resolved against the document, because the host serves the client
+     * relative to it and a root-absolute path breaks under a mount prefix.
      *
      * @param payload - range, workspace, and refresh.
      * @param doFetch - transport override, used by tests.
@@ -1116,8 +1131,12 @@ window.__ModuleLoader__.load({
     function fetchGain(payload, doFetch) {
       const send = doFetch ?? (typeof fetch === 'function' ? fetch : undefined)
       if (send === undefined) return Promise.reject(new Error('fetch is unavailable'))
+      const target =
+        typeof document === 'undefined' || typeof document.baseURI !== 'string'
+          ? GAIN_PATH
+          : new URL(GAIN_PATH, document.baseURI).href
       return Promise.resolve(
-        send(GAIN_PATH, {
+        send(target, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(payload),
@@ -1143,11 +1162,7 @@ window.__ModuleLoader__.load({
      * @param ctx - the browser plugin context.
      */
     function apply(ctx) {
-      const t = ctx.locale.bind(NS)
       const gainReader = createReader()
-      // The slot hands the registered component fixed props; this wrapper adds
-      // the reader the Gain panel needs without changing the slot contract.
-      const RowConfigSlot = (props) => h(RowConfigView, { ...props, gainReader })
       ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-rtk: dictionaries')
       ctx.effect(
         () =>
@@ -1158,8 +1173,12 @@ window.__ModuleLoader__.load({
                 key: ROW_KEY,
                 locale: NS,
                 order: 10,
+                // The entry-private reader travels through the registration's
+                // own inject factory, which is how the slot hands a component
+                // data that is not part of the shared props.
+                inject: () => ({ gainReader }),
               },
-              RowConfigSlot,
+              RowConfigView,
             ),
           ),
         'dsh-rtk: row config',

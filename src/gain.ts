@@ -277,7 +277,7 @@ export function usableWorkspace(value: unknown): string | undefined {
 
 /** One opened ledger database. */
 interface SqliteDatabase {
-  prepare(sql: string): { all(): unknown[] }
+  prepare(sql: string): { all(...params: unknown[]): unknown[] }
   close(): void
 }
 
@@ -399,7 +399,19 @@ export async function readCommands(database: string, filter: LedgerFilter = {}):
   let db: SqliteDatabase | undefined
   try {
     db = new sqlite.DatabaseSync(database, { readOnly: true })
-    const rows = db.prepare('select rtk_cmd, project_path, timestamp, input_tokens, output_tokens, saved_tokens from commands').all()
+    // The window is filtered in SQL so a long-lived ledger does not land in
+    // memory whole; the workspace filter stays in JavaScript because the stored
+    // path carries a Windows verbatim prefix that string equality would miss.
+    const rows =
+      filter.startDate === undefined
+        ? db
+            .prepare('select rtk_cmd, project_path, timestamp, input_tokens, output_tokens, saved_tokens from commands')
+            .all()
+        : db
+            .prepare(
+              'select rtk_cmd, project_path, timestamp, input_tokens, output_tokens, saved_tokens from commands where timestamp >= ?',
+            )
+            .all(filter.startDate)
     const wanted = filter.workspace === undefined ? undefined : normalizeProjectPath(filter.workspace)
     const byLabel = new Map<string, GainCommand>()
     for (const row of rows) {
@@ -521,7 +533,24 @@ export function createGainReader(options: GainReaderOptions): GainReader {
   const now = options.now ?? (() => Date.now())
   const cacheTtlMs = options.cacheTtlMs ?? 30_000
   const timeoutMs = options.timeoutMs ?? 15_000
+  // Bounded: the key is (range, workspace) and the workspace comes from the
+  // host's own registry or the ledger, but a long-lived panel must not grow a
+  // map without a ceiling.
+  // Bounded: the key is (range, workspace) and the workspace comes from the
+  // host's own registry or the ledger, but a long-lived panel must not grow a
+  // map without a ceiling.
   const cache = new Map<string, { at: number; report: GainReport }>()
+  const cacheLimit = 32
+
+  /** Store one report, evicting the oldest entry past the ceiling. */
+  function remember(key: string, at: number, report: GainReport): void {
+    cache.set(key, { at, report })
+    while (cache.size > cacheLimit) {
+      const oldest = cache.keys().next()
+      if (oldest.done === true) break
+      cache.delete(oldest.value)
+    }
+  }
 
   const readBreakdown = options.readCommands ?? readCommands
 
@@ -533,6 +562,8 @@ export function createGainReader(options: GainReaderOptions): GainReader {
       const key = `${range}|${workspace ?? ''}`
       const cached = cache.get(key)
       if (cached !== undefined && request.refresh !== true && now() - cached.at < cacheTtlMs) return cached.report
+
+
 
       const args = ['gain', ...(workspace === undefined ? [] : ['-p']), '-d', '-f', 'json']
       const result = await runner(options.executable(), args, {
@@ -550,7 +581,9 @@ export function createGainReader(options: GainReaderOptions): GainReader {
       const base = { database, range, workspace: workspace ?? null, workspaces, commands, generatedAt }
 
       if (result.code !== 0) {
-        const detail = (result.stderr || result.stdout).replace(/\s+/g, ' ').trim()
+        // The detail is rendered in the panel, so it is bounded: a stack trace
+        // or an absolute path is not an explanation.
+        const detail = (result.stderr || result.stdout).replace(/\s+/g, ' ').trim().slice(0, 200)
         const report: GainReport = {
           ...base,
           available: false,
@@ -558,7 +591,7 @@ export function createGainReader(options: GainReaderOptions): GainReader {
           summary: summarize([]),
           daily: [],
         }
-        cache.set(key, { at: generatedAt, report })
+        remember(key, generatedAt, report)
         return report
       }
 
@@ -571,13 +604,13 @@ export function createGainReader(options: GainReaderOptions): GainReader {
           summary: summarize([]),
           daily: [],
         }
-        cache.set(key, { at: generatedAt, report })
+        remember(key, generatedAt, report)
         return report
       }
 
       const sliced = sliceGain(parsed, range, new Date(generatedAt))
       const report: GainReport = { ...base, available: true, ...sliced }
-      cache.set(key, { at: generatedAt, report })
+      remember(key, generatedAt, report)
       return report
     },
   }
