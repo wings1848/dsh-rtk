@@ -238,7 +238,7 @@ $ rtk rewrite "ls -la /tmp | head -5"  → exit 1   （无输出）
 
 ### 复核对本报告的两处纠正（已落进文档）
 
-1. **「唯一接缝」的说法不完整。** 本报告此前只写「`tools/execute` 是唯一能改写命令的接缝」，**没有披露**官方 JSDoc 明确限定 wrapper「may change only `exec.signal`」。复核实测确认：改写能生效，只是因为执行对象直到 `notifyResult` 才被冻结——属于**未被支持的用法**，前向兼容无保证。这一披露现已写进 `README.md` 与 `README.zh.md` 的「注意」小节。
+1. **「唯一接缝」的说法不完整。** 本报告此前只写「`tools/execute` 是唯一能改写命令的接缝」，**没有披露**官方 JSDoc 明确限定 wrapper「may change only `exec.signal`」。复核实测确认：改写能生效，只是因为执行对象直到 `notifyResult` 才被冻结——属于**未被支持的用法**，前向兼容无保证。这一披露现已写进 `README.md` 的「注意」小节。
 2. **「压缩结果永不大于原文」曾不成立**（D1）。本报告此前把它列为无条件不变量，属于**夸大**；现已改为带修复历史的准确表述。
 
 ### 复核确认成立的部分
@@ -567,7 +567,7 @@ result: OK (9 passed, 0 failed, 2 warned, 5 skipped)
 `manifest-peers`（四个 `@deepseek-ai/dsh-*` 不是家族规范六子句）与
 `manifest-engines`（`>=22.18.0` 不覆盖 Node 24）；警告项 `display-meta`
 （缺 `locale/*.json` 与图标）随之清零。剩下两条警告是有意保留的：
-五语 README 只做中英双语、`packageManager` 钉在 `pnpm@12.3.4`（lockfile 已按 12 生成）。
+README 只做单一中文版（不提供英文或多语）、`packageManager` 钉在 `pnpm@12.3.4`（lockfile 已按 12 生成）。
 
 ### 17.2 回归
 

@@ -30,6 +30,13 @@
 
 ### Documentation
 
+- **Single Chinese README.** The document was rewritten against the refactored
+  feature set (rewriting covers `bash`/`pwsh`/`ops_bash`, compaction covers five
+  tools, child environments are scrubbed, five configuration fields, the row form
+  and the Gain panel, hosts 0.1.5/0.1.7/0.2.0/0.2.1) and now opens with an
+  acknowledgements section crediting the upstream repository
+  `wings1848/dsh-rtk`. The English `README.md` and `README.zh.md` were merged into
+  it, and `package.json` no longer publishes the retired file.
 - **README (both languages) now describes what the code does.** The settings
   paragraph describes the late upgrade instead of the old hard dependency, the
   acceptance-evidence claim is corrected and linked relatively, and the
