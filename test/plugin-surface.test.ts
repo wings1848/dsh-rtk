@@ -5,7 +5,7 @@ import { createRtkCommand } from '../lib/command.js'
 import { normalizeConfig } from '../lib/config.js'
 import { createMetricsTracker } from '../lib/metrics.js'
 import { parseExecutablePath, resolverNameFor, resolveRtkExecutable } from '../lib/rtk-executable.js'
-import { isStatusStale, shouldRequireRtkAvailability, shouldSkipRewrite } from '../lib/runtime-guard.js'
+import { isStatusStale, needsAvailabilityProbe, shouldSkipRewrite } from '../lib/runtime-guard.js'
 
 describe('rtk executable resolution', () => {
   it('picks the resolver command for the platform', () => {
@@ -62,10 +62,13 @@ describe('rtk executable resolution', () => {
 describe('runtime guard', () => {
   const base = normalizeConfig({})
 
-  it('consults availability only in rewrite mode', () => {
-    assert.equal(shouldRequireRtkAvailability(base), true)
-    assert.equal(shouldRequireRtkAvailability(normalizeConfig({ mode: 'suggest' })), false)
-    assert.equal(shouldRequireRtkAvailability(normalizeConfig({ mode: 'off' })), false)
+  it('probes availability in every mode that can use an answer', () => {
+    assert.equal(needsAvailabilityProbe(base), true)
+    // `suggest` mode reports what rtk would do, so it cannot skip the probe —
+    // skipping it is how the mode used to report a missing binary that was
+    // installed and suggest nothing at all.
+    assert.equal(needsAvailabilityProbe(normalizeConfig({ mode: 'suggest' })), true)
+    assert.equal(needsAvailabilityProbe(normalizeConfig({ mode: 'off' })), false)
   })
 
   it('stands rewriting down when rtk is missing, and when the plugin is off', () => {

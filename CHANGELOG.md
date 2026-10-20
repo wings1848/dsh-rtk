@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Fixed
+
+- **`suggest` mode works again.** It asked rtk for an equivalent only after an
+  availability probe, and the probe used to be skipped in every mode but
+  `rewrite` — so the mode never produced a suggestion and, worse, reported
+  "rtk not found" once per session on machines where rtk was installed. The
+  probe now runs whenever the plugin is not `off`.
+- **Child processes no longer inherit credentials.** `rtk` was spawned with
+  `process.env`, which handed it the harness's API key and every `DSH_*`
+  variable. Spawns now use the harness's own scrub rule (credential-shaped
+  names and `DSH_*` dropped, `PATH`/locale/proxy kept), with the ledger path
+  forwarded explicitly.
+- **A missing settings service no longer disables the plugin.** `settings` was
+  a hard dependency, so a composition without it kept rewriting and compaction
+  from ever activating. It is now an upgrade: the plugin starts on the
+  composition's config and switches to the live settings service when that
+  service appears.
+
 ### Added
 
 - **Browser half with a row configuration page.** The package now exports

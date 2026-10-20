@@ -22,6 +22,8 @@ import { Config, normalizeConfig, type RtkConfig } from './config.js'
 export interface SettingsBridge {
   /** One line telling `/rtk show` where this plugin's configuration is edited. */
   readonly note: string
+  /** Whether a real settings service answered; false means composition only. */
+  readonly attached: boolean
   /** The effective configuration right now, normalized and clamped. */
   read(): RtkConfig
   /** Observe committed configuration changes; returns a disposer. */
@@ -83,6 +85,7 @@ function listen(ctx: Context, event: string, handler: (...args: never[]) => void
 function createCompositionBridge(rawConfig: unknown, note: string): SettingsBridge {
   return {
     note,
+    attached: false,
     read: () => normalizeConfig(rawConfig),
     onChange: () => () => {},
     writable: false,
@@ -130,6 +133,7 @@ function createModernBridge(ctx: Context, rawConfig: unknown, settings: Record<s
   const ns = ownEntryId(ctx)
   const canWrite = ns !== undefined && typeof forms.mutate === 'function' && forms.writable !== false
   return {
+    attached: true,
     note:
       ns === undefined
         ? compositionOnlyNote('entry is live but its id could not be resolved')
@@ -186,6 +190,7 @@ function createLegacyBridge(ctx: Context, rawConfig: unknown, provider: Record<s
   try {
     const scope = legacy.register('dsh-rtk', Config, { base: rawConfig })
     return {
+      attached: true,
       note: 'the `dsh-rtk` namespace in the harness settings document',
       read: () => normalizeConfig(scope.get()),
       onChange: (callback) => scope.watch(() => callback()),
@@ -223,6 +228,7 @@ function createFollowingBridge(ctx: Context, rawConfig: unknown, provider: Legac
     }
   }
   return {
+    attached: true,
     note: `the \`dsh-rtk\` namespace in the harness settings document (this instance follows it; registration failed: ${error instanceof Error ? error.message : String(error)})`,
     read,
     writable: false,

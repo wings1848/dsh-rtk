@@ -2,6 +2,7 @@ import { statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join } from 'node:path'
 
+import { scrubbedEnv } from './child-env.js'
 import { runExecutable, type RtkRunResult } from './rtk-executable.js'
 
 /**
@@ -536,7 +537,7 @@ export function createGainReader(options: GainReaderOptions): GainReader {
       const args = ['gain', ...(workspace === undefined ? [] : ['-p']), '-d', '-f', 'json']
       const result = await runner(options.executable(), args, {
         timeoutMs,
-        env: { ...process.env, RTK_DB_PATH: database },
+        env: scrubbedEnv({ RTK_DB_PATH: database }),
         ...(workspace === undefined ? {} : { cwd: workspace }),
       })
       const generatedAt = now()

@@ -1,6 +1,8 @@
 import { execFile } from 'node:child_process'
 import { access } from 'node:fs/promises'
 
+import { scrubbedEnv } from './child-env.js'
+
 /** One settled `rtk` invocation. */
 export interface RtkRunResult {
   code: number
@@ -97,7 +99,7 @@ export function runExecutable(
         timeout: options.timeoutMs ?? 3000,
         maxBuffer: 4 * 1024 * 1024,
         windowsHide: true,
-        ...(options.env === undefined ? {} : { env: options.env }),
+        env: options.env ?? scrubbedEnv(),
         ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
         ...(options.signal === undefined ? {} : { signal: options.signal }),
       },

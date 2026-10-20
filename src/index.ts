@@ -12,8 +12,9 @@ import { createMetricsTracker } from './metrics.js'
 import { createRtkCommand } from './command.js'
 import { createGainReader, rtkHistoryDbPath, type GainRequest } from './gain.js'
 import { decideExecutableSetting, fileExists, looksLikeRtkPath, resolveRtkExecutable, runExecutable, type RtkExecutableResolution } from './rtk-executable.js'
+import { scrubbedEnv } from './child-env.js'
 import { applyRtkHistoryScope, resolveRtkRewrite, type ShellKind } from './rtk-rewrite.js'
-import { isStatusStale, shouldRequireRtkAvailability, shouldSkipRewrite, type RtkRuntimeStatus } from './runtime-guard.js'
+import { isStatusStale, needsAvailabilityProbe, shouldSkipRewrite, type RtkRuntimeStatus } from './runtime-guard.js'
 
 /** Cordis plugin name used by loader diagnostics. */
 export const name = 'rtk'
@@ -33,21 +34,19 @@ const GAIN_ROUTE_PATH = '/api/dsh-rtk/gain'
  * `tools/*` listeners, and without the registry there is nothing to rewrite or
  * compact.
  *
- * `settings` is declared too, and not because the plugin cannot run without it
- * — it can, entirely from the composition's `config:` block. It is declared
- * because the service registers *asynchronously* on every harness generation:
- * it reads the settings document first, so a plain `ctx.get('settings')` during
- * `apply` can find nothing and the live-settings integration silently never
- * attaches. Observed exactly that in production (`/rtk` reported "settings
- * service unavailable" while a sibling `ctx.get('spillStore')` succeeded).
- * Declaring it makes Cordis park this plugin until the service appears, then
- * activate it.
+ * `settings` is deliberately NOT declared. The plugin runs entirely from the
+ * composition's `config:` block; the live-settings integration is an upgrade,
+ * not a prerequisite, and declaring it required would park rewriting and
+ * compaction whenever a composition ships without that service. The service
+ * also registers *asynchronously* (it reads the settings document first), so
+ * `apply` starts on the composition bridge and swaps in the real one when the
+ * service appears — see the `ctx.inject(['settings'], …)` call at the end.
  *
  * `commands` and `systemPrompt` stay optional `ctx.get` lookups: they are
  * registered early enough to be present, and a composition without them should
  * still get the optimization.
  */
-export const inject = ['tools', 'settings']
+export const inject = ['tools']
 
 export { Config }
 
@@ -125,7 +124,7 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
   // plugin's own behavior never depends on which one answered: configuration
   // is `bridge.read()`, edits arrive through `bridge.onChange`, and an
   // unrecognized service costs the live-settings integration only.
-  const bridge = createSettingsBridge(ctx, rawConfig)
+  let bridge = createSettingsBridge(ctx, rawConfig)
   let config = bridge.read()
   let runtimeStatus: RtkRuntimeStatus = { rtkAvailable: false }
   const metrics = createMetricsTracker()
@@ -140,14 +139,19 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
   // abstracts over how each harness generation announces them (`scope.watch`
   // on the old one, `loader/volatile-update` on the new one); either way the
   // fixpoint is `bridge.read()`.
-  ctx.effect(
-    () =>
-      bridge.onChange(() => {
-        config = bridge.read()
-        applySourceFilterNote()
-      }),
-    'dsh-rtk.settings-watch',
-  )
+  let disposeSettingsWatch: (() => void) | undefined
+  function watchSettings(): void {
+    disposeSettingsWatch?.()
+    disposeSettingsWatch = bridge.onChange(() => {
+      config = bridge.read()
+      applySourceFilterNote()
+    })
+  }
+  watchSettings()
+  ctx.effect(() => () => {
+    disposeSettingsWatch?.()
+    disposeSettingsWatch = undefined
+  }, 'dsh-rtk.settings-watch')
 
   let disposeNote: (() => void) | undefined
   const systemPrompt = ctx.get('systemPrompt') as SystemPrompt | undefined
@@ -231,7 +235,7 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
   }
 
   async function ensureRuntimeStatusFresh(): Promise<void> {
-    if (!shouldRequireRtkAvailability(config)) return
+    if (!needsAvailabilityProbe(config)) return
     if (!isStatusStale(runtimeStatus, Date.now())) return
     try {
       await refreshRuntimeStatus()
@@ -412,7 +416,7 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
         const executable = runtimeStatus.rtkExecutableCommand ?? config.rtkExecutable
         const result = await runExecutable(executable, ['gain', ...tokens], {
           timeoutMs: 15000,
-          env: { ...process.env, RTK_DB_PATH: rtkHistoryDbPath() },
+          env: scrubbedEnv({ RTK_DB_PATH: rtkHistoryDbPath() }),
         })
         const text = [result.stdout, result.stderr]
           .map((part) => part.trim())
@@ -513,6 +517,21 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
   // Fill the executable setting in once per activation, so the configuration
   // page shows where rtk actually lives without waiting for a first command.
   if (bridge.writable) void syncDetectedExecutable()
+
+  // Upgrade to the live-settings integration when the service shows up. It
+  // registers asynchronously on every harness generation (it reads the settings
+  // document first), so a `ctx.get` during `apply` can legitimately find
+  // nothing; declaring the dependency instead would park the whole plugin.
+  if (!bridge.attached && typeof ctx.inject === 'function') {
+    ctx.inject(['settings'], (scoped: Context) => {
+      bridge = createSettingsBridge(scoped, rawConfig)
+      if (!bridge.attached) return
+      config = bridge.read()
+      watchSettings()
+      applySourceFilterNote()
+      if (bridge.writable) void syncDetectedExecutable()
+    })
+  }
 }
 
 /**

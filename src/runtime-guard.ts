@@ -15,14 +15,14 @@ export interface RtkRuntimeStatus {
 export const RUNTIME_STATUS_TTL_MS = 30_000
 
 /**
- * Whether a missing rtk binary must be established before handling a command.
+ * Whether this call must establish rtk availability before it is handled.
  *
- * Only rewrite mode consults availability: `suggest` mode reports what rtk
- * *would* do and never gates execution on it, and compaction is a pure text
- * transform that needs no binary at all.
+ * Every mode but `off` needs the answer: `rewrite` gates on it, and `suggest`
+ * cannot report what rtk *would* do without asking rtk. Only `off` skips the
+ * probe, because nothing is rewritten and compaction needs no binary.
  */
-export function shouldRequireRtkAvailability(config: RtkConfig): boolean {
-  return config.mode === 'rewrite'
+export function needsAvailabilityProbe(config: RtkConfig): boolean {
+  return config.mode !== 'off'
 }
 
 /**

@@ -27,10 +27,13 @@ function fakeContext(
   ctx: any
   listeners: Map<string, Listener[]>
   emit(event: string, ...args: unknown[]): Promise<unknown>
+  /** Register a service after `apply`, firing the injections waiting on it. */
+  provide(name: string, value: unknown): void
   effects: number
 } {
   const listeners = new Map<string, Listener[]>()
   const state = { effects: 0 }
+  const pending: { deps: string[]; callback: (scoped: any) => unknown }[] = []
   const ctx = {
     fiber: options.fiber,
     get: (name: string) => services[name],
@@ -49,6 +52,7 @@ function fakeContext(
     // the same, and only ever hands the callback a context carrying them.
     inject: (deps: string[], callback: (scoped: any) => unknown) => {
       if (deps.every((dependency) => services[dependency] !== undefined)) callback(ctx)
+      else pending.push({ deps, callback })
       return {}
     },
   }
@@ -56,6 +60,14 @@ function fakeContext(
     ctx,
     listeners,
     effects: state.effects,
+    provide(name, value) {
+      services[name] = value
+      for (const injection of [...pending]) {
+        if (!injection.deps.every((dependency) => services[dependency] !== undefined)) continue
+        pending.splice(pending.indexOf(injection), 1)
+        injection.callback(ctx)
+      }
+    },
     async emit(event, ...args) {
       const registered = listeners.get(event) ?? []
       assert.ok(registered.length > 0, `no listener registered for ${event}`)
@@ -556,5 +568,28 @@ describe('modern settings host (SettingsForms)', () => {
     assert.equal(result.kind, 'success')
     assert.match(String(result.text), /user overrides cleared/, 'the report line must describe what a reset actually does')
     assert.deepEqual(calls.replaced, [{ ns: 'rtk', section: {} }], 'reset must target the entry the plugin runs as')
+  })
+})
+describe('soft settings dependency', () => {
+  it('starts from the composition and upgrades when settings arrives later', async () => {
+    const registered: { handler: (invocation: { rawInput: string }) => Promise<unknown> }[] = []
+    const harness = fakeContext({ commands: { register: (definition: unknown) => (registered.push(definition as never), () => {}) } })
+    apply(harness.ctx, normalizeConfig({}) as never)
+
+    assert.equal(registered.length, 1, 'the /rtk command must register without a settings service')
+    const before = (await registered[0]!.handler({ rawInput: 'path' })) as { text: string }
+    assert.match(before.text, /composition only/, 'a missing settings service must not stop the plugin')
+
+    const applied: unknown[] = []
+    harness.provide('settings', {
+      describe: () => [],
+      mutate: async (ns: string, ops: unknown) => applied.push([ns, ops]),
+      replace: async () => {},
+      writable: true,
+    })
+
+    const after = (await registered[0]!.handler({ rawInput: 'path' })) as { text: string }
+    assert.match(after.text, /entry is live/, 'the bridge must upgrade to the live settings service')
+    assert.doesNotMatch(before.text, /entry is live/)
   })
 })
