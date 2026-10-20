@@ -54,6 +54,15 @@ describe('harness peer range', () => {
     assert.deepEqual(gaps, [], gaps.join('\n'))
   })
 
+  it('declares the family canonical range', () => {
+    const canonical =
+      '>=0.1.2-rc.1 <0.2.0 || >=0.1.5-alpha.1 <0.2.0 || >=0.1.6-0 <0.2.0 || >=0.1.7-0 <0.2.0 || >=0.2.0-0 <0.3.0 || >=0.2.1-0 <0.3.0'
+    for (const [name, range] of Object.entries(manifest.peerDependencies)) {
+      if (!name.startsWith('@deepseek-ai/dsh-')) continue
+      assert.equal(range, canonical, `${name} must declare the canonical family range verbatim`)
+    }
+  })
+
   it('keeps one shared range across the dsh packages', () => {
     const ranges = new Set(
       Object.entries(manifest.peerDependencies)

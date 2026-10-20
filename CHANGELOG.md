@@ -2,17 +2,238 @@
 
 ## Unreleased
 
+### Added
+
+- **Display metadata for the Plugin Manager.** The package now ships
+  `locale/en.json` and `locale/zh.json` (`meta.title` / `meta.description`)
+  and an original `icon.svg`, all exported from `package.json`, so the Plugins
+  page shows a real name, description and artwork instead of the bare package id.
+  They are read without activating the plugin, which is why they exist as files
+  rather than as client code.
+- **`prepare` script.** A git-source install now builds `lib/` (TypeScript plus
+  the browser bundle) instead of importing a package with no entry file.
+
+### Testing
+
+- **Keyless snapshots of the text the model and the user see.**
+  `test/transcript-snapshot.test.ts` pins a compacted build log (trailing
+  `[exit code: N]` marker included) and the whole `/rtk show` report, so a
+  wording or marker change fails the suite instead of reaching a request.
+- **Contracts that used to be asserted by construction.** Regression cases now
+  cover the `suggest`-mode probe, the child-environment scrub, migration through
+  the real schema (not a hand-built object), the fail-loud budget bounds, the
+  executable write-back rules, the document-relative route and the slot
+  registration inject factory.
+- **Source rules for the browser half.** The suite rejects literal colours,
+  pixel radii, DOM side effects, any `require` beyond `react`, and a `lib/`
+  bundle that differs from `src/`.
+
+### Documentation
+
+- **Single Chinese README.** The document was rewritten against the refactored
+  feature set (rewriting covers `bash`/`pwsh`/`ops_bash`, compaction covers five
+  tools, child environments are scrubbed, five configuration fields, the row form
+  and the Gain panel, hosts 0.1.5/0.1.7/0.2.0/0.2.1) and now opens with an
+  acknowledgements section crediting the upstream repository
+  `wings1848/dsh-rtk`. The English `README.md` and `README.zh.md` were merged into
+  it, and `package.json` no longer publishes the retired file.
+- **README (both languages) now describes what the code does.** The settings
+  paragraph describes the late upgrade instead of the old hard dependency, the
+  acceptance-evidence claim is corrected and linked relatively, and the
+  integration-test gap is stated as "skipped without rtk" rather than "fails".
+  The Chinese README gains the install step and the acceptance paragraph it was
+  missing, so the two files stay paired.
+- **`docs/verification.md` gained §17** with this round's environment, the
+  `dsh-plugin-dev check` output before and after, the per-batch test counts, the
+  new regression points and an explicit "not covered" list.
+- **Two Agent Notes** record the two decisions with durable consequences: the
+  unsanctioned `tools/execute` argument rewrite (with the rejected alternatives)
+  and the soft `settings` dependency.
+- **The tag workflow creates the GitHub release** after publishing, idempotently,
+  because the tag is the release-note anchor.
+
+### Fixed
+
+- **The Configure page and the Host UI rules line up.** The ledger request now
+  uses a document-relative route resolved against `document.baseURI` (a
+  root-absolute path breaks a deployment mounted under a prefix); colours come
+  only from `--dsw-alias-*` tokens and radii from `--dsw-radius-*` instead of
+  local pixel values; clearing the executable field to return to auto-detection
+  no longer makes Save permanently invalid; the meter's screen-reader label is
+  translated; the entry-private reader travels through the slot registration's
+  inject factory instead of a wrapper component; the refresh request is consumed
+  once instead of bypassing the cache forever; and the page no longer repeats the
+  title and description the Plugins chrome already draws.
+- **The panel degrades honestly.** A refused reset, an unreachable ledger and a
+  failure detail are all bounded: the detail is truncated to 200 characters, the
+  report cache has a ceiling, and the breakdown query filters its time window in
+  SQL instead of loading the whole table.
+- **Configuration written for the retired schema now migrates.** The loader
+  validates the composition's `config:` block before the plugin sees it, which
+  fills all five new fields with their schema defaults; the migration treated
+  "present" as "explicit" and therefore dropped every retired key except
+  `enabled`. A defaulted field is no longer mistaken for a user choice.
+- **An out-of-range `maxChars` fails at load time.** The schema now enforces
+  the published 1000–200000 bounds instead of accepting any integer and
+  clamping it later, so a typo is reported where it is written.
+- **Detection no longer writes a setting nobody asked for.** It used to write an
+  empty string when rtk was not found (pinning "not found" as an explicit
+  user-layer override) and to replace a hand-typed path that no longer existed.
+  It now only replaces the values it owns (empty, the shipped `rtk` default, or
+  its own earlier write) and never writes an empty value.
+- **A settings edit re-probes rtk.** The cached availability answer used to
+  outlive the executable it described by up to 30 seconds.
+- **`/rtk reset` no longer reports a refusal as success.** The bridge returns a
+  structured result, so a read-only profile or a rejected write comes back as an
+  error, and the success text no longer claims the user layer was cleared.
+- **`suggest` mode works again.** It asked rtk for an equivalent only after an
+  availability probe, and the probe used to be skipped in every mode but
+  `rewrite` — so the mode never produced a suggestion and, worse, reported
+  "rtk not found" once per session on machines where rtk was installed. The
+  probe now runs whenever the plugin is not `off`.
+- **Child processes no longer inherit credentials.** `rtk` was spawned with
+  `process.env`, which handed it the harness's API key and every `DSH_*`
+  variable. Spawns now use the harness's own scrub rule (credential-shaped
+  names and `DSH_*` dropped, `PATH`/locale/proxy kept), with the ledger path
+  forwarded explicitly.
+- **Peer ranges match the family canonical range.** `peerDependencies` now
+  carry the six-clause range the DSH plugin family publishes, which admits the
+  `0.2.1` line explicitly instead of relying on prerelease matching, and
+  `engines.node` admits Node 22.19+ and 24+ like the rest of the family.
+- **A missing settings service no longer disables the plugin.** `settings` was
+  a hard dependency, so a composition without it kept rewriting and compaction
+  from ever activating. It is now an upgrade: the plugin starts on the
+  composition's config and switches to the live settings service when that
+  service appears.
+
+### Added
+
+- **Browser half with a row configuration page.** The package now exports
+  `./client` and declares `dsh.client`, so the Web Plugins page shows a
+  **Configure** control on the `rtk` row. The page renders the five fields,
+  stages edits locally, commits them through the host settings service (the same
+  user layer `/rtk reset` clears), and marks overridden fields with a per-field
+  reset.
+- **Gain panel, wired to the ledger.** Below the form, the Configure page now
+  shows what rtk reclaimed: a 20-cell efficiency meter, a ledger of original
+  output / after rtk / saved (with the share), command count and average time,
+  and a breakdown that switches between **by day** and **by command** (the
+  command table is aggregated read-only from the ledger's `commands` table,
+  because neither `rtk gain` format carries one; every column header explains
+  itself through a tooltip). A value is read
+  from `rtk gain -d -f json` on the host, always with `RTK_DB_PATH` pointed at
+  this plugin's isolated history database, and can be sliced by **workspace**
+  (`rtk gain -p`; the picker is the host's `workspaceRegistry.list()`, with the
+  ledger's `project_path` rows as the fallback) and by
+  **time** (today / last 7 days / last 30 days / all time, filtered in UTC to
+  match rtk's own day grouping). The browser reads it through the host's exact
+  fetch route `/api/dsh-rtk/gain`, which the host registers on the connection's
+  authenticated `/api` prefix only when that service exists; a CLI host simply
+  reports the ledger as unavailable. Reports are cached for 30 seconds and the
+  refresh button bypasses the cache.
+- `src/gain.ts` owns that host side: argument shape, UTC window slicing,
+  verbatim-path normalization, read-only `node:sqlite` workspace/command
+  aggregation, and the 30-second report cache. `runExecutable` gained an optional `cwd` so
+  the workspace filter can run `rtk gain` inside the selected project.
+- `test/client-bundle.test.ts` pins the client contract: the
+  `window.__ModuleLoader__.load` wrapper and its package-name id, the
+  `plugins.row.config` registration key `@wingsbutterfly/dsh-rtk#rtk`, the
+  five rendered controls, the workspace/range controls, and the ledger
+  formatters. `test/gain.test.ts` covers the host reader.
+
+- `/rtk gain [flags]`: runs `rtk gain` against the plugin's own history database
+  (`RTK_DB_PATH`), so the savings of commands this plugin rewrote are queryable
+  from the command line instead of only by hand-pointing a terminal at
+  `%LOCALAPPDATA%\Temp\dsh-rtk\history.db`. Extra flags pass through
+  (`-H`, `-g`, `-f json`, …); `--reset` and `--yes` are refused because they
+  would erase the ledger.
+- `dsh.bundle` metadata (`dsh.bundle.patch` → [`cordis.patch.yml`](cordis.patch.yml)):
+  `dsh plugin --profile <name> add @wingsbutterfly/dsh-rtk` now installs **and**
+  mounts the plugin. The bundle layer inserts the host-plane `rtk` row, the same
+  row the manual `cordis.patch.yml` mount used to require.
+- dsh-ops support: `ops_bash` joins `REWRITABLE_TOOLS` and the compaction
+  pipeline (`bash`, `read`, `grep`, `ops_bash`, `ops_grep`), so dsh-ops
+  sessions get both command rewriting and output compaction. `ops_grep` reuses
+  the grep summarizer, with one guard: dsh-ops renders its Rust tools as a
+  single `JSON.stringify` line, which the match-list heuristic would mis-read
+  as "1 matches in 1 files" — JSON bodies are therefore left byte-exact.
+- `test/bundle-manifest.test.ts` pins the manifest contract: the declared patch
+  path, the patch's presence in `files`, and the inserted row's `id`/`name`.
+
+### Fixed
+
+- **The rtk executable setting is filled in automatically, including on
+  Windows.** Resolution ran on every call while the `rtkExecutable` field kept
+  reading the bare name, and a Windows harness whose PATH predated the install
+  (WinGet, cargo and Scoop each add their shim directory to the *user* PATH)
+  silently failed the single `where` lookup. The resolver now asks the platform
+  command first, then checks the Windows install directories (WinGet Links,
+  `%USERPROFILE%\.cargo\bin`, `%USERPROFILE%\scoop\shims`), running each
+  candidate with `--version` before trusting it. The path it finds is written
+  back into the setting through `settings.mutate`, so the configuration page
+  shows it; when nothing is found the field is written empty. Only values the
+  plugin owns (empty, the shipped `rtk` default, its own earlier write, or a
+  path that no longer exists) are rewritten, so a hand-typed value survives, and
+  a read-only profile (a home-patch row) refuses the write without disturbing the
+  runtime.
+- `/rtk <subcommand>` was delivered to the model as a chat message: the command
+  definition declared no `input`, and the harness client only routes a
+  space-argument line to a command that declares one (bare `/rtk` worked because
+  it does not need arguments). The definition now carries
+  `input: { hint: 'show | path | verify | stats | clear-stats | reset | help' }`,
+  pinned by a `plugin-surface` test.
+- **Gain panel failed with `HTTP 405`.** The host tried the connection's
+  generic RPC channel (`connection.rpc.handle('/dsh-rtk', …)`), whose route
+  registration reads `webServer` from the *connection service's own* Context —
+  a Context that injects only `credentials`, so the read throws
+  (`cannot get property "webServer" without inject`) and no route is ever
+  installed. `POST /dsh-rtk/gain` then fell through to the SPA fallback, which
+  answers 405. The panel now uses an **exact Fetch route**
+  (`/api/dsh-rtk/gain`) registered through `connection.fetch.register`, the
+  same authenticated `/api` transport the shipped file-upload package uses. A
+  failed registration is logged instead of taking the rewriting and compaction
+  halves down.
+
+### Changed
+
+- **Configuration reduced from 26 fields to 5**: `mode` (`off` | `rewrite` |
+  `suggest`), `compact`, `maxChars`, `readCompaction` (`none` | `budget` |
+  `minimal` | `aggressive`), and `rtkExecutable`. Retired fields are migrated by
+  `normalizeConfig` rather than ignored: `enabled: false` → `mode: off`,
+  `outputCompaction.enabled` → `compact`, `truncate.maxChars` → `maxChars`, and
+  the three read-compaction fields collapse into the single level. Every other
+  removed switch now sits at its previous default: `guardWhenRtkMissing`,
+  `notifyWhenRtkMissing`, `trackSavings`, `stripAnsi`, the five output
+  summarizers, `preserveExactSkillReads` and `truncate.enabled` stay on;
+  `showRewriteNotifications` stays off; `rewriteTimeoutMs` stays 3000;
+  `compactedTools` stays the five tools with a compactor. Spill deferral is
+  detected from the mounted `spillStore` service instead of configured.
+- `readCompaction` gained `budget`: bounds a `read` result by the character
+  budget without filtering source text — the behavior the old "enabled but not
+  filtering" combination produced.
+- `/rtk` now prints the five effective fields instead of the retired switch
+  tree.
+- **Scope decision revised (supersedes the 2026-10-11 entry).** A bundle patch
+  can only append rows to the root entry list, and root rows are instantiated
+  once per host process, so the mounted row's `tools/execute` /
+  `tools/post-execute` listeners are process-global: every session in the
+  profile gets rewriting and compaction, with no per-preset opt-in. The previous
+  "declare no `dsh.bundle`, stay agent-plane-first" position bought per-preset
+  opt-in at the cost of a manual mount line and an "installed, not active"
+  plugin-manager state. The bundle is now the default channel because
+  one-command installation is worth more than preset granularity; per-preset
+  use remains possible by skipping the bundle channel and adding the row to a
+  preset by hand (README, "Per-preset instead of global"). `mode: off`
+  and `mode: suggest` stay the switches that tame the global row — including
+  from a non-insert profile override (`- id: rtk` + full `config:`).
+
 ### Docs
 
-- The install section now says up front that `dsh plugin add` only installs the
-  package: the plugin manager shows "installed, not active" (「已安装，未生效」)
-  until the step-2 preset row activates it, and that is expected. Both READMEs
-  also carry a troubleshooting line keyed to the GUI's own wording
-  (「已安装，未生效」).
-- Decision on record (2026-10-11): `dsh-rtk` still declares **no** `dsh.bundle`.
-  A bundle patch can only insert a host-plane row, which would activate command
-  rewriting for every session and defeat per-preset opt-in — the plugin stays
-  agent-plane-first, "pick one plane" unchanged.
+- The install section now describes the bundle channel: install mounts a
+  host-plane row that covers every session in the profile, and the manual mount
+  line must be deleted when switching (two mounts, one id). Both READMEs also
+  keep the per-preset recipe and the "installed, not active" troubleshooting
+  line for the no-bundle path.
 
 ## 0.1.2
 

@@ -2,7 +2,7 @@
 
 本文件记录 `dsh-rtk` 的**闸门留痕**：每条关于框架行为的断言都配一条可复现命令与实测输出；每个回归测试都留下一次「修复前失败」的记录。
 
-日期：2026-09-12 · 环境：Node v26.7.0 · rtk 0.48.0 · DSH 0.1.5-rc.1
+本文件按小节累积，每节的命令与版本、Node 版本、rtk 版本、DSH 版本都在该节内自证；早期 2026-09 的结论针对当时的宿主，后续小节单独记录换代后的复核（例如 §11 是 0.1.7、§17 是 0.2.1-rc.2）。
 
 ---
 
@@ -98,8 +98,9 @@
 | 压缩失败不影响工具调用 | 测试 | `never breaks a tool call when compaction throws`：content 非数组时按原样 accept |
 | 改写只作用于单次调用，随后恢复原参数 | 测试 | `rewrites a supported command and restores the original afterwards` 断言派发后 `exec.arguments.command === 'git status'` |
 | rtk 不可用时命令原样执行 | 测试 | `degrades to the original command when rtk cannot be resolved`（指向不存在的二进制） |
-| 配置数值被钳制在公布区间 | 测试 | `clamps truncation budgets to their published bounds`（maxChars 1000–200000、maxLines 40–4000） |
-| 关闭总开关后行为完全惰性 | 测试 | `does nothing at all when disabled` |
+| 配置数值被钳制在公布区间 | 测试 | `clamps the character budget to its published bounds`（maxChars 1000–200000） |
+| 旧 schema 的字段被迁移而非忽略 | 测试 | `migration from the previous schema` 三组用例：`enabled: false` → `mode: off`、`outputCompaction.enabled`/`truncate.maxChars` → `compact`/`maxChars`、三个 readCompaction 字段 → 单一 level（含 `budget` 映射） |
+| 关闭总开关后行为完全惰性 | 测试 | `does nothing at all when disabled`（`mode: off`） |
 
 ---
 
@@ -142,9 +143,11 @@ $ dsh --profile web --dump-config | grep -A5 "^- id: rtk"
 647:- id: rtk
 648-  name: dsh-rtk
 649-  config:
-650-    enabled: true
-651-    mode: rewrite
+650-    mode: rewrite
 ```
+
+> 2026-10-20 复核：`enabled` 已在配置收敛中移除（`refactor(config)!`），此处旧的
+> dump 片段随之更新；旧字段仍由 `normalizeConfig` 迁移，不再出现在组合结果里。
 
 ### 6.2 命令确实被改写（决定性证据）
 
@@ -235,7 +238,7 @@ $ rtk rewrite "ls -la /tmp | head -5"  → exit 1   （无输出）
 
 ### 复核对本报告的两处纠正（已落进文档）
 
-1. **「唯一接缝」的说法不完整。** 本报告此前只写「`tools/execute` 是唯一能改写命令的接缝」，**没有披露**官方 JSDoc 明确限定 wrapper「may change only `exec.signal`」。复核实测确认：改写能生效，只是因为执行对象直到 `notifyResult` 才被冻结——属于**未被支持的用法**，前向兼容无保证。这一披露现已写进 `README.md` 与 `README.zh.md` 的「注意」小节。
+1. **「唯一接缝」的说法不完整。** 本报告此前只写「`tools/execute` 是唯一能改写命令的接缝」，**没有披露**官方 JSDoc 明确限定 wrapper「may change only `exec.signal`」。复核实测确认：改写能生效，只是因为执行对象直到 `notifyResult` 才被冻结——属于**未被支持的用法**，前向兼容无保证。这一披露现已写进 `README.md` 的「注意」小节。
 2. **「压缩结果永不大于原文」曾不成立**（D1）。本报告此前把它列为无条件不变量，属于**夸大**；现已改为带修复历史的准确表述。
 
 ### 复核确认成立的部分
@@ -418,3 +421,182 @@ pwsh 真机执行、grep 超限时的真实会话 e2e、`/rtk` 命令面与 sett
 - **未做 0.2.0 真宿主的 11.6 式六轮 e2e**：依据是 0.2.0-rc.1 与 0.2.0-rc.2 的 `lib/types` 零差异、两轮130 项测试全绿，加上本机 0.2.0-rc.1 宿主上插件确实在改写命令。要补就照 11.6 的配方换 0.2.0 重跑。
 - 守卫测试只在「devDeps 也前移」时报警：如果只升级宿主而不动 devDeps，仍要人工记得加一行 peer 范围（这是 semver prerelease 规则的固有形状，无法前瞻未来 rc 系）。
 
+## 13. 配置收敛到 5 个字段（2026-10-19）
+
+日期：2026-10-19 · 触发：配置 26 项过重、Web 界面无法呈现；先经独立评审（P1–P5）再定稿。
+
+### 13.1 结论
+
+- schema 只剩 `mode`（off | rewrite | suggest）、`compact`、`maxChars`、`readCompaction`（none | budget | minimal | aggressive）、`rtkExecutable`；其余 21 个叶子字段固定为原默认值。
+- `readCompaction` 把旧「`enabled` + `sourceCodeFilteringEnabled` + `sourceCodeFiltering`」三字段合并为一个层级：关 → `none`；开启且过滤为 minimal/aggressive → 同层级；开启但未过滤 → `budget`。P2 指出的「删布尔会翻转行为」由迁移消除。
+- `enabled` 删除，`mode: off` 即主开关；旧 `enabled: false` 由 `normalizeConfig` 迁移。
+- `deferToHarnessSpill` 删除：spill 服务在不在即决策，无需开关。代价是旧 `deferToHarnessSpill: false` 的「spill 在场也保留自身上限」能力消失（已声明）。
+- `smartTruncate` 删除（默认关、仅 read、与字符预算重叠）；`truncate.enabled` 删除（预算恒生效）；`preserveExactSkillReads` 恒为真（skill 读取必须精确）。
+
+### 13.2 证据
+
+| 标准 | 命令 | 实测 |
+|---|---|---|
+| 类型检查 | `node --run typecheck` | 退出 0、无输出 |
+| 构建 + 全量测试 | `node --run build && node --test test/*.test.ts` | `tests 143 / pass 143 / fail 0` |
+| 旧字段迁移 | `test/config.test.ts` → `migration from the previous schema` | 3 组用例全过（enabled、compaction/truncate、readCompaction 三态） |
+| 报告渲染新字段 | `test/plugin-surface.test.ts` → `/rtk command` | 断言 `dsh-rtk: rewrite`、`compact: on`、`maxChars: 12000`、`readCompaction: none` |
+| 跨平台解析用例 | `resolves a real binary when one is on PATH` | 改用 `node` + `resolverNameFor(process.platform)`，Windows/Posix 均可过 |
+| 未知键不被 schema 拒绝 | 直接用 schemastery standard-schema 验证 | 旧字段作为 extra key 原样透传，由 `normalizeConfig` 迁移后丢弃，不报错 |
+
+### 13.3 已知取舍
+
+- 旧组合「enabled=true + filtering 关」映射为 `budget`（保字符上限、不碰源码）；旧 `smartTruncate` 用户的丢行行为不复存在。
+- 设置页条目由 26 个控件变为 5 个；字段一旦删除，用户层里残留的旧键不会报错，但也不会再生效。
+
+## 14. 浏览器半边与行配置界面（2026-10-19）
+
+### 14.1 结论
+
+- `package.json` 增加 `exports["./client"]` 与 `dsh.client`（`platform: web`，注入 `dsh-client-locale`、`dsh-client-ui-settings`、`dsh-client-ui-plugin-manager`）；`build` 增加 `scripts/build-client.mjs`，把 `src/client/client.js` 复制为 `lib/client.js`。
+- 客户端按宿主要求交付 ModuleLoader wrapper（`window.__ModuleLoader__.load({ id, factory })`），只 `require("react")`——react 是平台 baseline 模块，无需 `dsh.client.external`。
+- 注册 `plugins.row.config`，键为 `@wingsbutterfly/dsh-rtk#rtk`；表单使用页面注入的 `form`（`state` 快照 + `mutate(ops, revision)`），操作格式 `{ op: 'set' | 'unset', path: [field], value? }`。
+- 收益面板已预留：`GainPanel(gain)` 在无数据时渲染占位说明与 `/rtk stats`、`/rtk gain -H` 提示，并带 `data-rtk-gain="reserved"` 标记；接入远端后只需传数据。
+- 5 个控件与 5 字段一一对应：mode（select）、compact（checkbox）、maxChars（number）、readCompaction（select）、rtkExecutable（text）。
+
+### 14.2 证据
+
+| 标准 | 命令 | 实测 |
+|---|---|---|
+| 类型检查 | `node --run typecheck` | 退出 0、无输出 |
+| 构建产出浏览器半边 | `node --run build` | 输出 `build-client: lib/client.js`，文件存在 |
+| 全量测试 | `node --test test/*.test.ts` | `tests 148 / pass 148 / fail 0` |
+| 客户端契约 | `node --test test/client-bundle.test.ts` | 5 项全过：manifest、wrapper id、slot 键、summary/unavailable、5 控件 + reserved Gain |
+| 仅依赖 baseline react | 测试里的 `require` 桩 | 除 `react` 外的请求直接断言失败 |
+
+### 14.3 已知限制
+
+- **未在运行中的 Web 宿主实机验证渲染**：本机 profile 安装的是已发布 0.1.2 包，checkout 未链接进 profile；实机验证需把 checkout 链接进 profile 并重启宿主，再刷新 Plugins 页。
+- **Gain 数据通道未接**（2026-10-20 已接入：宿主注册精确 fetch 路由 `/api/dsh-rtk/gain`，见第 15 节）：当时需要宿主侧注册远端接口（或等价 API）；客户端 `GainPanel` 的入参形状已预留。
+- 客户端 bundle 为手写交付格式，不走 tsdown；改 UI 时直接改 `src/client/client.js` 并重新构建，契约由 `test/client-bundle.test.ts` 兜底。
+- 设置页条目由 26 个控件变为 5 个；字段一旦删除，用户层里残留的旧键不会报错，但也不会再生效。
+
+## 15. 收益面板接入 rtk 台账（2026-10-20）
+
+### 15.1 结论
+
+- 宿主新增 `src/gain.ts`：执行 `rtk gain -d -f json`，`RTK_DB_PATH` 强制指向本插件隔离库（`%TEMP%\dsh-rtk\history.db`）；选工作区时以该目录为 `cwd` 并追加 `-p`；时间窗按 rtk 的 `daily` 行以 UTC 日期过滤并重算 summary；工作区列表用只读 `node:sqlite` 读 `commands.project_path`（动态导入，取不到就只丢下拉）；报告缓存 30 秒，`refresh` 绕过。
+- `src/index.ts` 在 Web connection 服务存在时，经 `ctx.connection.fetch.register` 注册**精确 fetch 路由** `/api/dsh-rtk/gain`（POST，buffered，返回 `{ ok, value | error }`），走连接带鉴权的 `/api` 前缀；无 connection 的 CLI 宿主不注册，面板显示台账不可用。
+- 通用 RPC 通道（`connection.rpc.handle`）不可用：它用 connection 服务自身 Context 读 `webServer`，而该 Context 只 inject `credentials`，读取直接抛 `cannot get property "webServer" without inject`，路由从未注册 → 请求落到 SPA fallback 得到 HTTP 405。精确 fetch 路由无此依赖，且仓库内 file-upload 包已验证同一通路。
+- `GainPanel` 提供工作区下拉、今日 / 近 7 天 / 近 30 天 / 全部、刷新，渲染五态、20 格效率计量、台账行、数据源脚注，中英双语；客户端用 `fetch('/api/dsh-rtk/gain')` 取数（cookie 随同源请求自动带上），不再依赖客户端 connection 服务。
+- 工作区下拉改取原生 `ctx.workspaceRegistry.list()`（标题+路径，去重后保留标题）；registry 未挂载时才回退到库里的 `project_path` 历史值，避免列出已不存在的旧工程。
+- 明细新增「按天 / 按命令」切换：按命令行由 `src/gain.ts` 的 `readCommands` 从插件库 `commands` 表只读聚合（`rtk <动词>` 归类，含次数/处理前/处理后/省下比例），因为 `rtk gain -f json|csv` 都不含按命令明细；总账仍取 `rtk gain`。
+- 台账文案改为「原始输出 / rtk 处理后 / 省下（占比）」，每日与按命令表格补表头，所有列头与数据格带 `title` tooltip。
+- `runExecutable` 增加可选 `cwd`，供工作区过滤使用；其余行为不变。
+
+### 15.2 证据
+
+| 标准 | 命令 / 方式 | 实测 |
+|---|---|---|
+| 类型检查 | `node --run typecheck` | 退出 0、无输出 |
+| 构建 | `node --run build` | `tsc` 通过，输出 `build-client: lib/client.js` |
+| 全量测试 | `node --run test` | `tests 176 / pass 176 / fail 0` |
+| 宿主读取真实台账 | 临时脚本调用 `createGainReader` | 库为 `%TEMP%\dsh-rtk\history.db`；工作区 34 个（首项 `G:\GitWork\dsh-rtk`，180 条）；近 7 天 556 条 / 163.9K saved / 67.7%；按工作区过滤后 180 条 |
+| 客户端就绪态渲染 | 临时脚本以有状态 React 桩驱动 `GainPanel` | `data-rtk-gain="ready"`，渲染 67.7% 计量、`163.9K`、每日 10-19 / 10-20、数据源路径 |
+| 按命令聚合 | 真实库调用 `readCommands` | 近 7 天：`rtk ls` 233 次/81.7%、`rtk read` 54 次/74.8%、`rtk grep` 189 次/38.5%、`rtk diff` 5 次/94.5% 等，按省下 token 降序 |
+| 工作区来源 | `test/gain.test.ts` → native registry 用例 | registry 有值时 `listWorkspaces` 一次都不调用；verbatim 与普通路径去重为一条，标题保留 |
+| 表格与 tooltip | `test/client-bundle.test.ts` | 按天/按命令表头齐全，`title` 含 `gainTipSavedDay`/`gainTipCallsDay`/`gainTipRatio`；命令视图渲染 `rtk grep` 行；空命令列表给出提示 |
+| 路由注册 | `test/integration.test.ts` | 路由为 `/api/dsh-rtk/gain`、 methods `['POST']`、buffered；handler 回 `{ ok: true, value }`，坏 JSON 回落默认值；没有 connection 时仍挂载两半管线 |
+| 客户端取数 | `test/client-bundle.test.ts` → `fetchGain` | POST `/api/dsh-rtk/gain`，content-type JSON，body 透传；非 2xx 抛 `HTTP <status>` |
+| 405 根因复现 | 真实 cordis + 伪造 connection（`handle` 读缺失的 `webServer`） | 服务属性访问抛 `cannot get property "webServer" without inject`（connection 自身 Context 只 inject credentials）→ 前缀路由从未注册 → SPA fallback 405；改用精确 fetch 路由后无此依赖 |
+| 通路先例 | 宿主的 `@deepseek-ai/dsh-client-file-upload` | 同样用 `ctx.connection.fetch.register({ path: '/api/...', methods: ['POST'], requestBody, fetch })` 注册与鉴权，证明该 API 可用 |
+| 路由实测 | `curl -X POST http://127.0.0.1:<port>/api/dsh-rtk/gain` | 修复前 405（fallback）；重启宿主加载新代码后应为 401（进入 `/api` 鉴权，未带 cookie） |
+
+### 15.3 已知限制
+
+- 时间窗按 UTC 切日，与 rtk 自身的 `daily` 分组一致；本地时区日界附近的记录可能落在相邻日期。
+- 不要回退到 `connection.rpc.handle`：它读 connection 自身 Context 上的 `webServer` 会抛 `without inject`，路由静默缺失、表现为 HTTP 405（由 SPA fallback 回答）。
+- 工作区列表优先用原生 registry；只有 registry 不可用时才回退 `node:sqlite` 读库，此时可能看到已不在侧栏的旧工程。按命令明细始终依赖 `node:sqlite`，取不到就是空表，不影响总账。
+- 面板仍是打开时取数（30 秒缓存），不做实时推送；需要最新数字时按刷新。
+- 未在运行中的 Web 宿主实机点击验证：宿主启动图仍加载 profile 里已发布的 `lib/client.js`，实机核验需把 checkout 链接进 profile 后重启宿主。
+
+## 16. rtk 路径自动探测与写回设置项（2026-10-20）
+
+### 16.1 结论
+
+- 根因两条：①探测只在调用时做一次 PATH 解析（Windows 用 `where`，超时 1 s），没有任何已知安装目录回退，宿主进程 PATH 早于 rtk 安装时（WinGet / cargo / scoop 只改用户 PATH）静默失败；②解析结果只进运行时状态，从不写回设置项，所以「rtk 路径」始终显示 `rtk` 或空。
+- `src/rtk-executable.ts`：`resolveRtkExecutable` 先按平台解析器查找；Windows 上解析失败且名字是自动态（空、`rtk`、或已失效的路径）时，依次尝试 `%LOCALAPPDATA%\Microsoft\WinGet\Links\rtk.exe`、`%USERPROFILE%\.cargo\bin\rtk.exe`、`%USERPROFILE%\scoop\shims\rtk.exe`，每个候选先判存在再跑 `--version` 验证；命中记 resolver=`candidate`。手填的名字/路径不参与候选回退。
+- 配置的路径已不存在时视为陈旧值，回落为按裸名 `rtk` 重新查找（升级/卸载后自愈）。
+- `decideExecutableSetting` 只接管插件自己的值：空、默认 `rtk`、上次自动写入值、或已失效的路径；手填值不动。找不到时写空串（自动态）。
+- `src/settings-compat.ts` 增加 `writable` 与 `persistRtkExecutable`：现代宿主用 `settings.mutate(ns, [{ op: 'set', path: ['rtkExecutable'], value }])` 只写一个字段；旧 provider 与组合层不写（旧 provider 的 `replace` 会把其余字段整体落到用户层）；只读 profile 抛错一律吞掉，不影响改写/压缩。
+- `src/index.ts` 在 `apply` 时与每次 `refreshRuntimeStatus`（含 `/rtk verify`）后同步一次；写成功后重读配置，失败不产生用户可见错误。
+- `normalizeConfig` 保留显式空串（自动态）；字段缺失仍回落默认 `rtk`。
+
+### 16.2 证据
+
+| 标准 | 命令 | 实测 |
+|---|---|---|
+| 类型检查 | `node --run typecheck` | 退出 0、无输出 |
+| 全量测试 | `node --run check` | `tests 199 / pass 199 / fail 0`（新增 20 项） |
+| 本机真实解析 | `resolveRtkExecutable({ configured: 'rtk' })` | `resolver: where`，`resolvedPath: C:\\Users\\lenovo\\AppData\\Local\\Microsoft\\WinGet\\Links\\rtk.exe` |
+| 回退候选真实命中 | 同函数，`resolverCommand: 'no-such-resolver-xyz'` | `resolver: candidate`，同一 WinGet 路径（存在判定 + `--version` 验证后命中） |
+| 陈旧路径自愈 | `resolveRtkExecutable({ configured: 'C:/stale/rtk.exe' })` | 回落按 `rtk` 查找，返回 WinGet 路径 |
+| Windows 候选清单 | `test/rtk-executable.test.ts` → `windowsRtkCandidates` | 三种安装目录按环境变量拼出；缺失变量跳过 |
+| 候选验证与顺序 | 同文件 | 存在但 `--version` 失败的候选被跳过，改取下一个；非 win32 平台一次都不探测候选 |
+| 写回决策 | 同文件 → `decideExecutableSetting` | 空/默认值被填充；找不到时写空；手填值不覆盖；已失效路径被替换 |
+| 单字段写入 | `test/settings-compat.test.ts` → `auto-detected executable write-back` | `mutate` 收到 `{ op: 'set', path: ['rtkExecutable'], value }`；只读 profile、无 `mutate` 的宿主、旧 provider 均返回 false 不抛错 |
+| 空串语义 | `test/config.test.ts` | `rtkExecutable: ''` 与全空白 → `''`；字段缺失 → 默认 `rtk` |
+
+### 16.3 已知限制
+
+- 旧 provider（dsh 0.1.5）不写回设置项：其 `replace` 是整段替换，会把其余四个字段一并记为用户覆盖；该代仍按运行时解析工作。
+- 候选目录只覆盖 WinGet、cargo、scoop 的默认位置；通过 `npm` 安装的 `.cmd` shim 不能直接 `execFile`（Windows 上无 shell 会 EINVAL），因此不在候选内。
+- 自动写入发生在插件激活与每次探测刷新时；若 profile 行位于 home patch（只读），写入被拒，表现为设置项保持原值。
+- 未在运行中的 Web 宿主实机点击验证写回后的表单刷新：宿主需把 checkout 链接进 profile 并重启。
+
+---
+
+## 17. 合规复核与修复（2026-10-20）
+
+**环境**：Node v24.21.0 · DSH 0.2.1-rc.2（桌面宿主）· rtk 0.56.0（WinGet 安装，插件自动探测命中）。
+**方法**：按 `dsh-plugin-guide` `0.3.39` 的红线与官方文档副本逐条核对，先只读审计、再按「运行期正确性 → 交付门禁 → 配置 → 面板 → 文档」五批修复，每批单独提交并跑全量静态检查。
+
+### 17.1 机械检查
+
+```
+$ node bin/dsh-plugin-dev.js check --cwd G:/GitWork/dsh-rtk
+result: OK (9 passed, 0 failed, 2 warned, 5 skipped)
+```
+
+修复前同一命令为 `FAILED (6 passed, 2 failed, 3 warned, 5 skipped)`：失败项是
+`manifest-peers`（四个 `@deepseek-ai/dsh-*` 不是家族规范六子句）与
+`manifest-engines`（`>=22.18.0` 不覆盖 Node 24）；警告项 `display-meta`
+（缺 `locale/*.json` 与图标）随之清零。剩下两条警告是有意保留的：
+README 只做单一中文版（不提供英文或多语）、`packageManager` 钉在 `pnpm@12.3.4`（lockfile 已按 12 生成）。
+
+### 17.2 回归
+
+```
+$ env -u RTK_DB_PATH node --run check
+ℹ tests 216
+ℹ pass 216
+ℹ fail 0
+```
+
+逐批结果：重构前 203 → 交付元数据 209 → 配置 209 → 面板 216。`RTK_DB_PATH` 必须清除，
+否则宿主注入的隔离库路径会让 `rtk` 相关用例读到另一份台账。
+
+### 17.3 新增的回归点
+
+- `suggest` 模式：探测条件由「仅 rewrite」改为「非 off」，并用
+  `plugin-surface` 固定；此前该模式既不探测也不产出建议，还会误报 rtk 缺失。
+- 子进程环境：新增 `test/child-env.test.ts`，凭据型键名与 `DSH_*` 必须被滤掉、`PATH` 必须保留。
+- 配置迁移：`test/config.test.ts` 改为经 `Config['~standard'].validate` 后再归一化，
+  复现生产路径（校验先填默认值）；越界 `maxChars` 必须有 `issues`。
+- 自动写回：`decideExecutableSetting` 只覆盖插件自有值，且不再写空串。
+- 面板：路由按 `document.baseURI` 解析、reader 走注册的 inject 工厂、无字面色 /
+  无字面圆角 / 无 DOM 越界 / 只 require `react` / `src` 与 `lib` 逐字节一致，
+  全部在 `test/client-bundle.test.ts` 的源码规则组里。
+- 快照：`test/transcript-snapshot.test.ts` 固定模型可见文本（带退出码标记的压缩结果、
+  `/rtk show` 报告），不依赖任何模型 API。
+
+### 17.4 未覆盖
+
+- 仍无真实浏览器渲染验证（明暗主题、窄宽度、焦点态）；面板的路由与样式只做了源码级与 VM 级断言。
+- `tools/execute` 里改写 `exec.arguments` 仍是未文档化接缝（见 README 的同名小节），
+  本轮没有改动它；宿主若提前冻结执行对象，改写会静默失效。

@@ -104,7 +104,7 @@ describe('compaction preserves the harness contract', () => {
 
   it('refuses to cut through a marker when truncating', () => {
     const filler = Array.from({ length: 4000 }, (_, index) => `line ${index} ${'x'.repeat(40)}`).join('\n')
-    const small = normalizeConfig({ outputCompaction: { truncate: { maxChars: 1000 } } })
+    const small = normalizeConfig({ maxChars: 1000 })
     const outcome = compactToolResult({ toolName: 'bash', args: { command: 'echo hi' }, content: [{ type: 'text', text: `${filler}\n[exit code: 7]` }] }, small)
     const text = (outcome.content as Array<{ text: string }>)[0]?.text ?? ''
     assert.ok(text.length <= 1000 + 64, `expected a bounded result, got ${text.length} chars`)
@@ -138,6 +138,29 @@ describe('per-tool dispatch', () => {
     const result = compact('grep', { pattern: 'x' }, noisy)
     assert.equal(result.changed, false)
     assert.equal(result.text, noisy)
+  })
+
+  it('compacts dsh-ops bash results on the bash path', () => {
+    const result = compact('ops_bash', { command: 'git status' }, bigStatus())
+    assert.equal(result.changed, true)
+    assert.ok(result.techniques.includes('git'))
+  })
+
+  it('groups dsh-ops grep match lines like grep', () => {
+    const result = compact('ops_grep', { pattern: 'const' }, bigGrep())
+    assert.equal(result.changed, true)
+    assert.ok(result.techniques.includes('search'))
+    assert.match(result.text, /40 matches in 4 files/)
+  })
+
+  it('leaves structured dsh-ops grep output byte-exact', () => {
+    const body = JSON.stringify({
+      query: 'const',
+      matches: [{ file: 'src/a.ts', line: 1, text: 'const value = 1' }],
+    })
+    const result = compact('ops_grep', { pattern: 'const' }, body)
+    assert.equal(result.changed, false)
+    assert.equal(result.text, body)
   })
 })
 

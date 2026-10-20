@@ -27,10 +27,13 @@ function fakeContext(
   ctx: any
   listeners: Map<string, Listener[]>
   emit(event: string, ...args: unknown[]): Promise<unknown>
+  /** Register a service after `apply`, firing the injections waiting on it. */
+  provide(name: string, value: unknown): void
   effects: number
 } {
   const listeners = new Map<string, Listener[]>()
   const state = { effects: 0 }
+  const pending: { deps: string[]; callback: (scoped: any) => unknown }[] = []
   const ctx = {
     fiber: options.fiber,
     get: (name: string) => services[name],
@@ -45,11 +48,26 @@ function fakeContext(
       const disposer = callback()
       return typeof disposer === 'function' ? disposer : () => {}
     },
+    // Cordis parks a fiber until its injected services exist; the stand-in does
+    // the same, and only ever hands the callback a context carrying them.
+    inject: (deps: string[], callback: (scoped: any) => unknown) => {
+      if (deps.every((dependency) => services[dependency] !== undefined)) callback(ctx)
+      else pending.push({ deps, callback })
+      return {}
+    },
   }
   return {
     ctx,
     listeners,
     effects: state.effects,
+    provide(name, value) {
+      services[name] = value
+      for (const injection of [...pending]) {
+        if (!injection.deps.every((dependency) => services[dependency] !== undefined)) continue
+        pending.splice(pending.indexOf(injection), 1)
+        injection.callback(ctx)
+      }
+    },
     async emit(event, ...args) {
       const registered = listeners.get(event) ?? []
       assert.ok(registered.length > 0, `no listener registered for ${event}`)
@@ -96,6 +114,52 @@ describe('apply() wiring', () => {
     assert.ok(harness.listeners.has('tools/post-execute'), 'expected a tools/post-execute listener')
   })
 
+  it('registers the gain fetch route under the authenticated /api prefix', async () => {
+    const opened: {
+      route?: { path: string; methods: readonly string[]; requestBody: string; fetch: (request: Request) => Promise<Response> }
+    } = {}
+    const connection = {
+      fetch: {
+        register(route: { path: string; methods: readonly string[]; requestBody: string; fetch: (request: Request) => Promise<Response> }) {
+          opened.route = route
+          return () => {}
+        },
+      },
+    }
+    const harness = fakeContext({ connection })
+    apply(harness.ctx, REWRITE_CONFIG as never)
+    assert.equal(opened.route?.path, '/api/dsh-rtk/gain')
+    assert.deepEqual(Array.from(opened.route?.methods ?? []), ['POST'])
+    assert.equal(opened.route?.requestBody, 'buffered')
+
+    // The handler only needs a JSON body; a real Request is unnecessary here.
+    const response = await opened.route?.fetch({ json: async () => ({ range: 'week' }) } as unknown as Request)
+    const body = (await response?.json()) as { ok: boolean; value?: { range: string } }
+    assert.equal(body.ok, true)
+    assert.equal(body.value?.range, 'week')
+
+    const malformed = await opened.route?.fetch({ json: async () => { throw new Error('bad json') } } as unknown as Request)
+    assert.equal(((await malformed?.json()) as { ok: boolean }).ok, true, 'a malformed body falls back to defaults')
+
+    const headless = fakeContext()
+    apply(headless.ctx, REWRITE_CONFIG as never)
+    assert.equal(headless.listeners.has('tools/execute'), true, 'a context without connection still mounts both halves')
+  })
+
+  it('keeps both halves alive when the route registration throws', async () => {
+    const connection = {
+      fetch: {
+        register() {
+          throw new Error('connection: exact Fetch route "/api/dsh-rtk/gain" is already registered')
+        },
+      },
+    }
+    const harness = fakeContext({ connection })
+    apply(harness.ctx, REWRITE_CONFIG as never)
+    assert.ok(harness.listeners.has('tools/execute'), 'a failed route must not take the pipeline down')
+    assert.ok(harness.listeners.has('tools/post-execute'))
+  })
+
   it('rewrites a supported command and restores the original afterwards', { skip: rtkSkip }, async () => {
     const harness = fakeContext()
     apply(harness.ctx, REWRITE_CONFIG as never)
@@ -110,6 +174,27 @@ describe('apply() wiring', () => {
     assert.equal(result.isError, false)
     assert.match(String(seenByBody), /\brtk git status$/, 'the body must see the rewritten command')
     assert.match(String(seenByBody), /RTK_DB_PATH=/, 'the rewritten command must scope the rtk history database')
+    assert.equal((exec.arguments as { command: string }).command, 'git status', 'the original arguments must be restored')
+  })
+
+  it('rewrites a supported command for the dsh-ops bash tool', { skip: rtkSkip }, async () => {
+    const harness = fakeContext()
+    apply(harness.ctx, REWRITE_CONFIG as never)
+
+    const exec = {
+      name: 'ops_bash',
+      callId: 'call-ops',
+      arguments: { command: 'git status', description: 'test' },
+      signal: new AbortController().signal,
+    }
+    let seenByBody: unknown
+    const result = await harness.emit('tools/execute', exec, async () => {
+      seenByBody = (exec.arguments as { command: string }).command
+      return { isError: false, value: 'ok', content: [{ type: 'text', text: 'ok' }] }
+    })
+
+    assert.equal(result.isError, false)
+    assert.match(String(seenByBody), /\brtk git status$/, 'the body must see the rewritten command')
     assert.equal((exec.arguments as { command: string }).command, 'git status', 'the original arguments must be restored')
   })
 
@@ -167,7 +252,7 @@ describe('apply() wiring', () => {
 
   it('does nothing at all when disabled', async () => {
     const harness = fakeContext()
-    apply(harness.ctx, normalizeConfig({ enabled: false }) as never)
+    apply(harness.ctx, normalizeConfig({ mode: 'off' }) as never)
 
     const exec = bashExecution('git status')
     let seenByBody: unknown
@@ -180,9 +265,9 @@ describe('apply() wiring', () => {
 
   it('degrades to the original command when rtk cannot be resolved', async () => {
     const harness = fakeContext()
-    // A path that cannot exist: resolution is skipped and the --version probe
-    // fails, so the guard must stand the rewrite down.
-    apply(harness.ctx, normalizeConfig({ rtkExecutable: '/nonexistent/rtk-binary' }) as never)
+    // A name that cannot resolve anywhere: the --version probe fails, so the
+    // guard must stand the rewrite down.
+    apply(harness.ctx, normalizeConfig({ rtkExecutable: 'rtk-not-installed-xyz' }) as never)
 
     const exec = bashExecution('git status')
     let seenByBody: unknown
@@ -278,8 +363,8 @@ describe('missing-rtk notice', () => {
 
   it('tells a session once, and only once, that rtk is missing', async () => {
     const harness = fakeContext()
-    // A path that cannot exist, so the guard stands every rewrite down.
-    apply(harness.ctx, normalizeConfig({ rtkExecutable: '/nonexistent/rtk-binary' }) as never)
+    // A name that cannot resolve, so the guard stands every rewrite down.
+    apply(harness.ctx, normalizeConfig({ rtkExecutable: 'rtk-not-installed-xyz' }) as never)
     const agent = { id: 'session-notice' }
 
     const first = await callOnce(harness, 'call-1', agent)
@@ -295,7 +380,7 @@ describe('missing-rtk notice', () => {
 
   it('tells a different session its own first time', async () => {
     const harness = fakeContext()
-    apply(harness.ctx, normalizeConfig({ rtkExecutable: '/nonexistent/rtk-binary' }) as never)
+    apply(harness.ctx, normalizeConfig({ rtkExecutable: 'rtk-not-installed-xyz' }) as never)
 
     await callOnce(harness, 'call-a', { id: 'session-a' })
     const other = await callOnce(harness, 'call-b', { id: 'session-b' })
@@ -303,16 +388,6 @@ describe('missing-rtk notice', () => {
     assert.match(text, /rtk not found/, 'each session gets told independently')
   })
 
-  it('stays quiet when the notice is switched off', async () => {
-    const harness = fakeContext()
-    apply(
-      harness.ctx,
-      normalizeConfig({ rtkExecutable: '/nonexistent/rtk-binary', notifyWhenRtkMissing: false }) as never,
-    )
-    const decision = await callOnce(harness, 'call-1', { id: 'session-quiet' })
-    const text = (decision.content ?? []).map((block: { text: string }) => block.text).join('\n')
-    assert.doesNotMatch(text, /rtk not found/)
-  })
 })
 
 describe('spill coordination', () => {
@@ -352,19 +427,6 @@ describe('spill coordination', () => {
     assert.ok(text.length > 0 && text.length <= 13000, `expected a bounded result, got ${text.length} chars`)
   })
 
-  it('keeps its own bound when a row opts out of deferring', async () => {
-    const harness = fakeContext({ spillStore: {} })
-    apply(
-      harness.ctx,
-      normalizeConfig({
-        outputCompaction: { deferToHarnessSpill: false, truncate: { enabled: true, maxChars: 2000 } },
-      }) as never,
-    )
-
-    const decision = await postExecute(harness)
-    const text = (decision.content ?? []).map((block: { text: string }) => block.text).join('')
-    assert.ok(text.length > 0 && text.length <= 2100, `an opted-out row must keep its budget, got ${text.length} chars`)
-  })
 })
 
 describe('settings integration', () => {
@@ -388,7 +450,7 @@ describe('settings integration', () => {
     }
 
     const harness = fakeContext({ settings })
-    apply(harness.ctx, normalizeConfig({ enabled: true, mode: 'rewrite' }) as never)
+    apply(harness.ctx, normalizeConfig({ mode: 'rewrite' }) as never)
 
     assert.deepEqual(registered.map((entry) => entry.ns), ['dsh-rtk'])
     assert.equal(watched.length, 1, 'the plugin must observe later settings edits')
@@ -450,9 +512,9 @@ describe('modern settings host (SettingsForms)', () => {
 
   it('observes live config edits committed into the running references', async () => {
     const calls = { replaced: [] as Array<{ ns: string; section: unknown }> }
-    const enabled = ref(true)
+    const mode = ref('rewrite')
     const harness = fakeContext({ settings: modernSettings(calls) })
-    const raw = { ...normalizeConfig({}), enabled }
+    const raw = { ...normalizeConfig({}), mode }
     apply(harness.ctx, raw as never)
 
     const huge = [{ type: 'text', text: 'y'.repeat(30000) }]
@@ -475,8 +537,8 @@ describe('modern settings host (SettingsForms)', () => {
 
     // The loader commits a volatile-only settings edit in place and announces
     // it; the plugin must stop compacting without a remount.
-    ;(enabled as unknown as { [key: symbol]: (next: unknown) => void })[Symbol.for('cosmokit.volatile.write')](false)
-    await harness.emit('loader/volatile-update', [['enabled']])
+    ;(mode as unknown as { [key: symbol]: (next: unknown) => void })[Symbol.for('cosmokit.volatile.write')]('off')
+    await harness.emit('loader/volatile-update', [['mode']])
 
     const after = await postExecute()
     const text = (after.content ?? []).map((block: { text: string }) => block.text).join('')
@@ -504,7 +566,34 @@ describe('modern settings host (SettingsForms)', () => {
     assert.ok(command, 'the /rtk command must register against the modern host')
     const result = await command.handler({ rawInput: 'reset' })
     assert.equal(result.kind, 'success')
-    assert.match(String(result.text), /user overrides cleared/, 'the report line must describe what a reset actually does')
+    assert.match(
+      String(result.text),
+      /values it inherits from the composition/,
+      'the report line must describe what a reset actually does',
+    )
     assert.deepEqual(calls.replaced, [{ ns: 'rtk', section: {} }], 'reset must target the entry the plugin runs as')
+  })
+})
+describe('soft settings dependency', () => {
+  it('starts from the composition and upgrades when settings arrives later', async () => {
+    const registered: { handler: (invocation: { rawInput: string }) => Promise<unknown> }[] = []
+    const harness = fakeContext({ commands: { register: (definition: unknown) => (registered.push(definition as never), () => {}) } })
+    apply(harness.ctx, normalizeConfig({}) as never)
+
+    assert.equal(registered.length, 1, 'the /rtk command must register without a settings service')
+    const before = (await registered[0]!.handler({ rawInput: 'path' })) as { text: string }
+    assert.match(before.text, /composition only/, 'a missing settings service must not stop the plugin')
+
+    const applied: unknown[] = []
+    harness.provide('settings', {
+      describe: () => [],
+      mutate: async (ns: string, ops: unknown) => applied.push([ns, ops]),
+      replace: async () => {},
+      writable: true,
+    })
+
+    const after = (await registered[0]!.handler({ rawInput: 'path' })) as { text: string }
+    assert.match(after.text, /entry is live/, 'the bridge must upgrade to the live settings service')
+    assert.doesNotMatch(before.text, /entry is live/)
   })
 })
