@@ -108,7 +108,12 @@ export const Config = z.object({
     z.boolean().default(DEFAULT_CONFIG.compact).description('Compact tool output before it reaches the model.'),
   ),
   maxChars: editable(
-    z.natural().default(DEFAULT_CONFIG.maxChars).description('Character budget for compacted text (1000–200000).'),
+    z
+      .natural()
+      .min(BOUNDS.maxChars.min)
+      .max(BOUNDS.maxChars.max)
+      .default(DEFAULT_CONFIG.maxChars)
+      .description('Character budget for compacted text (1000–200000).'),
   ),
   readCompaction: editable(
     z
@@ -203,6 +208,23 @@ function normalizeMode(root: Record<string, unknown>): RtkMode {
 }
 
 /**
+ * Whether a field carries an explicit value rather than the schema default.
+ *
+ * The loader validates the composition's `config:` block before `apply` sees
+ * it, and validation fills every field with its schema default. So "the new
+ * field is present" cannot mean "the user set it": a configuration written for
+ * the retired schema arrives with all five new fields already populated. A
+ * retired key therefore wins only when the new field still holds the default —
+ * the transitional case where a user pinned the new field to exactly the
+ * default while also carrying the old key is the one this cannot distinguish,
+ * and it is not worth the complexity.
+ */
+function isExplicit(value: unknown, isDefault: boolean, legacyPresent: boolean): boolean {
+  if (value === undefined) return false
+  return isDefault ? !legacyPresent : true
+}
+
+/**
  * Resolve read compaction, migrating the retired `outputCompaction` fields.
  *
  * The old shape needed three fields to express one behavior: the enable flag,
@@ -215,9 +237,15 @@ function normalizeMode(root: Record<string, unknown>): RtkMode {
  *   `budget`, which keeps the character bound but leaves source text alone
  */
 function normalizeReadCompaction(root: Record<string, unknown>, legacy: Record<string, unknown>): ReadCompaction {
-  if (isReadCompaction(root.readCompaction)) return root.readCompaction
-
   const legacyRead = asRecord(legacy.readCompaction)
+  const legacyPresent = legacyRead.enabled !== undefined
+  const explicit = isExplicit(
+    root.readCompaction,
+    root.readCompaction === DEFAULT_CONFIG.readCompaction,
+    legacyPresent,
+  )
+  if (explicit && isReadCompaction(root.readCompaction)) return root.readCompaction
+
   if (legacyRead.enabled !== true) return DEFAULT_CONFIG.readCompaction
 
   const filtering = legacy.sourceCodeFilteringEnabled === true
@@ -243,11 +271,21 @@ export function normalizeConfig(raw: unknown): RtkConfig {
   const root = asRecord(plainize(raw))
   const legacy = asRecord(root.outputCompaction)
   const legacyTruncate = asRecord(legacy.truncate)
-  const rawMaxChars = root.maxChars !== undefined ? root.maxChars : legacyTruncate.maxChars
+
+  // A field the loader defaulted is not an explicit choice, so the retired key
+  // may still speak for it (see {@link isExplicit}).
+  const rawMaxChars =
+    isExplicit(root.maxChars, root.maxChars === DEFAULT_CONFIG.maxChars, legacyTruncate.maxChars !== undefined)
+      ? root.maxChars
+      : legacyTruncate.maxChars
+  const rawCompact =
+    isExplicit(root.compact, root.compact === DEFAULT_CONFIG.compact, legacy.enabled !== undefined)
+      ? root.compact
+      : legacy.enabled
 
   return {
     mode: normalizeMode(root),
-    compact: pickBoolean(root.compact, pickBoolean(legacy.enabled, DEFAULT_CONFIG.compact)),
+    compact: pickBoolean(rawCompact, DEFAULT_CONFIG.compact),
     maxChars: pickNumber(rawMaxChars, DEFAULT_CONFIG.maxChars, BOUNDS.maxChars.min, BOUNDS.maxChars.max),
     readCompaction: normalizeReadCompaction(root, legacy),
     rtkExecutable: pickExecutable(root.rtkExecutable),

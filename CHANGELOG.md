@@ -15,6 +15,24 @@
 
 ### Fixed
 
+- **Configuration written for the retired schema now migrates.** The loader
+  validates the composition's `config:` block before the plugin sees it, which
+  fills all five new fields with their schema defaults; the migration treated
+  "present" as "explicit" and therefore dropped every retired key except
+  `enabled`. A defaulted field is no longer mistaken for a user choice.
+- **An out-of-range `maxChars` fails at load time.** The schema now enforces
+  the published 1000–200000 bounds instead of accepting any integer and
+  clamping it later, so a typo is reported where it is written.
+- **Detection no longer writes a setting nobody asked for.** It used to write an
+  empty string when rtk was not found (pinning "not found" as an explicit
+  user-layer override) and to replace a hand-typed path that no longer existed.
+  It now only replaces the values it owns (empty, the shipped `rtk` default, or
+  its own earlier write) and never writes an empty value.
+- **A settings edit re-probes rtk.** The cached availability answer used to
+  outlive the executable it described by up to 30 seconds.
+- **`/rtk reset` no longer reports a refusal as success.** The bridge returns a
+  structured result, so a read-only profile or a rejected write comes back as an
+  error, and the success text no longer claims the user layer was cleared.
 - **`suggest` mode works again.** It asked rtk for an equivalent only after an
   availability probe, and the probe used to be skipped in every mode but
   `rewrite` — so the mode never produced a suggestion and, worse, reported

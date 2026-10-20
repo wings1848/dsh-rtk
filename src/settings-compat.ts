@@ -32,8 +32,14 @@ export interface SettingsBridge {
   readonly writable: boolean
   /** Store an auto-detected rtk path (empty string means "not found"); reports whether it stuck. */
   persistRtkExecutable(value: string): Promise<boolean>
-  /** Restore the user layer to the composition's values; returns the report line. */
-  reset(): Promise<string>
+  /** Restore the row to the values it inherits from the composition. */
+  reset(): Promise<SettingsResetResult>
+}
+
+/** Outcome of one reset, so a refusal cannot be reported as a success. */
+export interface SettingsResetResult {
+  ok: boolean
+  text: string
 }
 
 /** How the report line reads when configuration lives in the composition only. */
@@ -44,8 +50,15 @@ function compositionOnlyNote(detail: string): string {
 /** Message for a reset when no writable settings layer backs this instance. */
 const COMPOSITION_RESET = 'dsh-rtk: there is no writable settings layer here — edit the composition `config:` block instead.'
 
-/** What a successful reset says — the user layer is cleared, not "defaults" set. */
-const RESET_DONE = "dsh-rtk: user overrides cleared — configuration is back to the composition's values."
+/**
+ * What a successful reset says.
+ *
+ * Deliberately not "user overrides cleared": the host rewrites the row with the
+ * inherited values, and it only drops a user-layer key when the written value
+ * equals the inherited one, so the layer may still list explicit values. What
+ * the user can rely on is the effective values.
+ */
+const RESET_DONE = 'dsh-rtk: the row is back to the values it inherits from the composition.'
 
 /** What a refused reset says; the refusal must never look like a success. */
 function resetFailed(error: unknown): string {
@@ -90,7 +103,7 @@ function createCompositionBridge(rawConfig: unknown, note: string): SettingsBrid
     onChange: () => () => {},
     writable: false,
     persistRtkExecutable: async () => false,
-    reset: async () => COMPOSITION_RESET,
+    reset: async () => ({ ok: false, text: COMPOSITION_RESET }),
   }
 }
 
@@ -158,16 +171,16 @@ function createModernBridge(ctx: Context, rawConfig: unknown, settings: Record<s
       }
     },
     reset: async () => {
-      if (ns === undefined) return COMPOSITION_RESET
+      if (ns === undefined) return { ok: false, text: COMPOSITION_RESET }
       try {
         await forms.replace(ns, {})
       } catch (error) {
         // The service validates writes (a stale revision, an entry with no
         // editable fields, a read-only profile). A refused reset must report
         // the refusal, not a success the user will trust.
-        return resetFailed(error)
+        return { ok: false, text: resetFailed(error) }
       }
-      return RESET_DONE
+      return { ok: true, text: RESET_DONE }
     },
   }
 }
@@ -202,9 +215,9 @@ function createLegacyBridge(ctx: Context, rawConfig: unknown, provider: Record<s
         try {
           await scope.replace({})
         } catch (error) {
-          return resetFailed(error)
+          return { ok: false, text: resetFailed(error) }
         }
-        return RESET_DONE
+        return { ok: true, text: RESET_DONE }
       },
     }
   } catch (error) {
@@ -237,6 +250,9 @@ function createFollowingBridge(ctx: Context, rawConfig: unknown, provider: Legac
       listen(ctx, 'settings/updated', ((ns: string) => {
         if (ns === 'dsh-rtk') callback()
       }) as (...args: never[]) => void),
-    reset: async () => 'dsh-rtk: this instance does not own the settings namespace — reset it from the instance that does.',
+    reset: async () => ({
+      ok: false,
+      text: 'dsh-rtk: this instance does not own the settings namespace — reset it from the instance that does.',
+    }),
   }
 }

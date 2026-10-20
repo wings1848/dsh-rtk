@@ -11,7 +11,7 @@ import { parseBashResult, renderBashResult } from './compact/dsh-result.js'
 import { createMetricsTracker } from './metrics.js'
 import { createRtkCommand } from './command.js'
 import { createGainReader, rtkHistoryDbPath, type GainRequest } from './gain.js'
-import { decideExecutableSetting, fileExists, looksLikeRtkPath, resolveRtkExecutable, runExecutable, type RtkExecutableResolution } from './rtk-executable.js'
+import { decideExecutableSetting, resolveRtkExecutable, runExecutable, type RtkExecutableResolution } from './rtk-executable.js'
 import { scrubbedEnv } from './child-env.js'
 import { applyRtkHistoryScope, resolveRtkRewrite, type ShellKind } from './rtk-rewrite.js'
 import { isStatusStale, needsAvailabilityProbe, shouldSkipRewrite, type RtkRuntimeStatus } from './runtime-guard.js'
@@ -144,6 +144,9 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
     disposeSettingsWatch?.()
     disposeSettingsWatch = bridge.onChange(() => {
       config = bridge.read()
+      // The new values may point at a different executable, so the cached probe
+      // answer is no longer this configuration's answer.
+      runtimeStatus = { rtkAvailable: false }
       applySourceFilterNote()
     })
   }
@@ -182,9 +185,10 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
    * found must land there — until this existed, every call resolved rtk while
    * the field kept reading the bare name, and a Windows harness whose PATH
    * missed the install directory showed "not found" with no hint of the real
-   * path. A found path is written, an empty value is written when nothing was
-   * found, and a hand-typed value is never touched. A settings layer that
-   * refuses writes costs this convenience only.
+   * path. A found path replaces a value this plugin owns (empty or the shipped
+   * `rtk` default); a hand-typed value and a failed detection are left alone,
+   * so the user layer never gains an explicit override nobody asked for. A
+   * settings layer that refuses writes costs this convenience only.
    */
   async function syncDetectedExecutable(resolution?: RtkExecutableResolution): Promise<void> {
     if (syncingExecutable) return
@@ -192,12 +196,10 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
     try {
       const current = config.rtkExecutable
       const resolved = resolution ?? (await resolveRtkExecutable({ configured: current }))
-      const currentMissing = looksLikeRtkPath(current) && !(await fileExists(current))
       const next = decideExecutableSetting({
         current,
         ...(resolved.resolvedPath === undefined ? {} : { detected: resolved.resolvedPath }),
         ...(autoPersistedExecutable === undefined ? {} : { autoWritten: autoPersistedExecutable }),
-        currentMissing,
       })
       if (next === undefined) return
       if (!(await bridge.persistRtkExecutable(next))) return
@@ -396,9 +398,10 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
     const command = createRtkCommand({
       getConfig: () => config,
       resetConfig: async () => {
-        const message = await bridge.reset()
+        const result = await bridge.reset()
         config = bridge.read()
-        return message
+        runtimeStatus = { rtkAvailable: false }
+        return result.ok ? { kind: 'success', text: result.text } : { kind: 'error', text: result.text }
       },
       getRuntimeStatus: () => runtimeStatus,
       refreshRuntimeStatus,

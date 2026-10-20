@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { BOUNDS, DEFAULT_CONFIG, normalizeConfig } from '../lib/config.js'
+import { BOUNDS, Config, DEFAULT_CONFIG, normalizeConfig } from '../lib/config.js'
 
 describe('normalizeConfig', () => {
   it('returns every default when given nothing', () => {
@@ -37,9 +37,26 @@ describe('normalizeConfig', () => {
     assert.equal(normalizeConfig({}).rtkExecutable, DEFAULT_CONFIG.rtkExecutable)
   })
 
-  it('clamps the character budget to its published bounds', () => {
+  it('clamps the character budget when values arrive unvalidated', () => {
+    // `apply` can be reached with objects that never went through the schema
+    // (tests, a runtime patch), so normalization still clamps.
     assert.equal(normalizeConfig({ maxChars: 1 }).maxChars, BOUNDS.maxChars.min)
     assert.equal(normalizeConfig({ maxChars: 10_000_000 }).maxChars, BOUNDS.maxChars.max)
+  })
+
+  it('rejects an out-of-bounds character budget at load time', () => {
+    // The loader validates the composition's config, and a bad value must fail
+    // loudly there instead of being silently clamped into something the user
+    // did not ask for.
+    const schema = Config as unknown as { '~standard': { validate(value: unknown): { issues?: unknown[] } } }
+    for (const maxChars of [1, 10_000_000, 0, -5]) {
+      const result = schema['~standard'].validate({ maxChars })
+      assert.ok((result.issues?.length ?? 0) > 0, `maxChars=${maxChars} must be rejected by the schema`)
+    }
+    for (const maxChars of [BOUNDS.maxChars.min, 12000, BOUNDS.maxChars.max]) {
+      const result = schema['~standard'].validate({ maxChars })
+      assert.equal(result.issues, undefined, `maxChars=${maxChars} must be accepted`)
+    }
   })
 
   it('falls back for values of the wrong type rather than trusting them', () => {
@@ -101,6 +118,27 @@ describe('migration from the previous schema', () => {
       normalizeConfig({ outputCompaction: { readCompaction: { enabled: true }, sourceCodeFilteringEnabled: true } }).readCompaction,
       'budget',
     )
+  })
+
+  it('migrates the retired fields through the schema the loader actually uses', () => {
+    // Regression: validation runs first and fills every new field with its
+    // schema default, so a naive "the new field is present" check made the whole
+    // migration dead code in production. Validating here reproduces that path.
+    const schema = Config as unknown as { '~standard': { validate(value: unknown): { value: unknown } } }
+    const validated = schema['~standard'].validate({
+      enabled: false,
+      outputCompaction: {
+        enabled: true,
+        truncate: { maxChars: 2000 },
+        readCompaction: { enabled: true },
+        sourceCodeFilteringEnabled: true,
+        sourceCodeFiltering: 'aggressive',
+      },
+    }).value
+    const config = normalizeConfig(validated)
+    assert.equal(config.mode, 'off', 'enabled: false must still mean off')
+    assert.equal(config.maxChars, 2000, 'the retired budget must beat the schema default')
+    assert.equal(config.readCompaction, 'aggressive', 'the retired filter level must survive validation')
   })
 
   it('prefers the new fields when both shapes are present', () => {

@@ -199,26 +199,24 @@ export interface ExecutableSettingInput {
   detected?: string
   /** A value this plugin wrote on an earlier pass; such values stay managed. */
   autoWritten?: string
-  /** Whether the current value names a path that no longer exists. */
-  currentMissing: boolean
 }
 
 /**
  * Decide the next rtkExecutable value, or `undefined` to leave it alone.
  *
- * Only values this plugin owns are rewritten: empty (auto), the shipped default
- * `rtk`, a value it wrote before, or a path that no longer exists. A value the
- * user typed by hand is never overwritten, because it is an explicit choice.
- * When detection found nothing the owned value becomes empty, which is how the
- * form shows "not found" while the runtime keeps probing the bare name.
+ * Only values this plugin owns are rewritten: empty (the "auto-detect" state)
+ * and the shipped default `rtk`. A hand-typed value — including a path that no
+ * longer exists — is never overwritten, because it is an explicit choice the
+ * user may be about to fix.
+ *
+ * Detection never writes an empty value: an empty string in the user layer
+ * would pin "not found" as an explicit override, shadowing any later default or
+ * composition value. When detection finds nothing the setting is left alone and
+ * `/rtk verify` is where the user learns it.
  */
 export function decideExecutableSetting(input: ExecutableSettingInput): string | undefined {
-  const managed =
-    input.current === '' ||
-    input.current === 'rtk' ||
-    input.current === input.autoWritten ||
-    input.currentMissing
+  const managed = input.current === '' || input.current === 'rtk' || input.current === input.autoWritten
   if (!managed) return undefined
-  const desired = input.detected ?? ''
-  return desired === input.current ? undefined : desired
+  if (input.detected === undefined) return undefined
+  return input.detected === input.current ? undefined : input.detected
 }

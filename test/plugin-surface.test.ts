@@ -126,7 +126,7 @@ describe('/rtk command', () => {
   const config = normalizeConfig({})
   const command = createRtkCommand({
     getConfig: () => config,
-    resetConfig: async () => "dsh-rtk: user overrides cleared — configuration is back to the composition's values.",
+    resetConfig: async () => ({ kind: 'success', text: 'dsh-rtk: the row is back to the values it inherits from the composition.' }),
     getRuntimeStatus: () => ({ rtkAvailable: true, rtkExecutablePath: '/usr/bin/rtk' }),
     refreshRuntimeStatus: async () => ({ rtkAvailable: true, rtkExecutablePath: '/usr/bin/rtk' }),
     getMetrics: () => tracker.summary(),
@@ -167,7 +167,7 @@ describe('/rtk command', () => {
   it('reports a failed verification as an error', async () => {
     const failing = createRtkCommand({
       getConfig: () => config,
-      resetConfig: async () => "dsh-rtk: user overrides cleared — configuration is back to the composition's values.",
+      resetConfig: async () => ({ kind: 'success', text: 'reset' }),
       getRuntimeStatus: () => ({ rtkAvailable: false }),
       refreshRuntimeStatus: async () => ({ rtkAvailable: false, lastError: 'spawn rtk ENOENT' }),
       getMetrics: () => tracker.summary(),
@@ -199,7 +199,7 @@ describe('/rtk command', () => {
   it('reports a failed `gain` query as an error', async () => {
     const failing = createRtkCommand({
       getConfig: () => config,
-      resetConfig: async () => '',
+      resetConfig: async () => ({ kind: 'success', text: 'reset' }),
       getRuntimeStatus: () => ({ rtkAvailable: true }),
       refreshRuntimeStatus: async () => ({ rtkAvailable: true }),
       getMetrics: () => ({ calls: 0 }),
@@ -233,6 +233,22 @@ describe('/rtk command', () => {
     const cleared = await command.handler({ rawInput: 'clear-stats' })
     assert.equal(cleared.kind, 'success')
     assert.equal(tracker.summary().calls, 0)
+  })
+
+  it('reports a refused reset as an error rather than a success', async () => {
+    const refusing = createRtkCommand({
+      getConfig: () => config,
+      resetConfig: async () => ({ kind: 'error', text: 'dsh-rtk: reset was refused (read-only profile)' }),
+      getRuntimeStatus: () => ({ rtkAvailable: true }),
+      refreshRuntimeStatus: async () => ({ rtkAvailable: true }),
+      getMetrics: () => tracker.summary(),
+      clearMetrics: () => {},
+      runGain: async () => ({ kind: 'success', text: '' }),
+      configLocation: () => 'x',
+    })
+    const result = await refusing.handler({ rawInput: 'reset' })
+    assert.equal(result.kind, 'error', 'a refused reset must not read as a success')
+    assert.match(String(result.text), /refused/)
   })
 
   it('accepts a reset and prints help', async () => {

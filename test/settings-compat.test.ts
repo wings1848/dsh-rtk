@@ -98,9 +98,10 @@ describe('legacy settings provider (dsh 0.1.5)', () => {
     const bridge = createSettingsBridge(fakeContext({ settings: provider }).ctx, {})
     set({ mode: 'off' })
     assert.equal(bridge.read().mode, 'off')
-    const message = await bridge.reset()
+    const result = await bridge.reset()
     assert.deepEqual(calls.replaced, [{}])
-    assert.match(message, /user overrides cleared/)
+    assert.equal(result.ok, true)
+    assert.match(result.text, /values it inherits from the composition/)
   })
 
   it('follows a namespace owned by another instance instead of failing', async () => {
@@ -125,7 +126,9 @@ describe('legacy settings provider (dsh 0.1.5)', () => {
     harness.emit('settings/updated', 'dsh-rtk', {})
     assert.equal(changes, 1)
 
-    assert.match(await bridge.reset(), /does not own the settings namespace/)
+    const result = await bridge.reset()
+    assert.equal(result.ok, false)
+    assert.match(result.text, /does not own the settings namespace/)
   })
 })
 
@@ -160,7 +163,9 @@ describe('modern settings host (dsh 0.1.7)', () => {
     harness.emit('loader/volatile-update', [['enabled']])
     assert.equal(changes, 1)
 
-    assert.match(await bridge.reset(), /user overrides cleared/)
+    const reset = await bridge.reset()
+    assert.equal(reset.ok, true)
+    assert.match(reset.text, /values it inherits from the composition/)
     assert.deepEqual(calls.replaced, [{ ns: 'rtk', section: {} }], 'reset must name the entry the plugin runs as')
     assert.match(bridge.note, /`rtk` entry/)
   })
@@ -177,21 +182,26 @@ describe('modern settings host (dsh 0.1.7)', () => {
     }
     const harness = fakeContext({ settings: forms }, { fiber: { entry: { options: { id: 'rtk' } } } })
     const bridge = createSettingsBridge(harness.ctx, {})
-    const message = await bridge.reset()
-    assert.match(message, /reset was refused \(Plugin entry "rtk" has no volatile fields\)/)
-    assert.match(message, /composition `config:` block/, 'the way out must stay visible')
+    const result = await bridge.reset()
+    assert.equal(result.ok, false, 'a refused reset must not read as a success')
+    assert.match(result.text, /reset was refused \(Plugin entry "rtk" has no volatile fields\)/)
+    assert.match(result.text, /composition `config:` block/, 'the way out must stay visible')
   })
 
   it('survives a modern surface without replace at all', async () => {
     const harness = fakeContext({ settings: { describe: () => [] } }, { fiber: { entry: { options: { id: 'rtk' } } } })
     const bridge = createSettingsBridge(harness.ctx, {})
-    assert.match(await bridge.reset(), /reset was refused/)
+    const result = await bridge.reset()
+    assert.equal(result.ok, false)
+    assert.match(result.text, /reset was refused/)
   })
 
   it('never resets a different entry when its own id cannot be resolved', async () => {
     const { forms, calls } = fakeForms()
     const bridge = createSettingsBridge(fakeContext({ settings: forms }).ctx, {})
-    assert.match(await bridge.reset(), /composition `config:` block/)
+    const result = await bridge.reset()
+    assert.equal(result.ok, false)
+    assert.match(result.text, /composition `config:` block/)
     assert.deepEqual(calls.replaced, [], 'a blind reset could wipe a sibling plugin’s settings')
   })
 })
@@ -266,7 +276,9 @@ describe('unknown settings generations', () => {
       const bridge = createSettingsBridge(harness.ctx, { enabled: true })
       assert.equal(bridge.read().mode, 'rewrite')
       assert.match(bridge.note, /composition only/)
-      assert.match(await bridge.reset(), /composition `config:` block/)
+      const reset = await bridge.reset()
+      assert.equal(reset.ok, false)
+      assert.match(reset.text, /composition `config:` block/)
       let changes = 0
       assert.doesNotThrow(() => bridge.onChange(() => (changes += 1)))
       harness.emit('loader/volatile-update', [[]])

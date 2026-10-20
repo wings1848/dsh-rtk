@@ -145,47 +145,32 @@ describe('decideExecutableSetting', () => {
   const DETECTED = 'C:\\Users\\me\\AppData\\Local\\Microsoft\\WinGet\\Links\\rtk.exe'
 
   it('fills a detected path into an empty setting', () => {
-    assert.equal(decideExecutableSetting({ current: '', detected: DETECTED, currentMissing: false }), DETECTED)
+    assert.equal(decideExecutableSetting({ current: '', detected: DETECTED }), DETECTED)
   })
 
   it('fills a detected path over the shipped default name', () => {
-    assert.equal(decideExecutableSetting({ current: 'rtk', detected: DETECTED, currentMissing: false }), DETECTED)
+    assert.equal(decideExecutableSetting({ current: 'rtk', detected: DETECTED }), DETECTED)
   })
 
-  it('clears the setting when detection found nothing', () => {
-    assert.equal(decideExecutableSetting({ current: 'rtk', currentMissing: false }), '')
-  })
-
-  it('leaves an empty setting empty when detection found nothing', () => {
-    assert.equal(decideExecutableSetting({ current: '', currentMissing: false }), undefined)
+  it('leaves the setting alone when detection found nothing', () => {
+    // Writing an empty string would pin "not found" as an explicit user-layer
+    // override, shadowing every later default.
+    assert.equal(decideExecutableSetting({ current: 'rtk' }), undefined)
+    assert.equal(decideExecutableSetting({ current: '' }), undefined)
   })
 
   it('keeps its own earlier write when detection agrees', () => {
     assert.equal(
-      decideExecutableSetting({ current: DETECTED, detected: DETECTED, autoWritten: DETECTED, currentMissing: false }),
+      decideExecutableSetting({ current: DETECTED, detected: DETECTED, autoWritten: DETECTED }),
       undefined,
     )
   })
 
-  it('replaces its own earlier write when the path disappeared', () => {
-    assert.equal(
-      decideExecutableSetting({ current: DETECTED, autoWritten: DETECTED, currentMissing: true }),
-      '',
-    )
-  })
-
-  it('never overwrites a hand-typed value', () => {
-    assert.equal(
-      decideExecutableSetting({ current: 'D:\\bin\\rtk.exe', detected: DETECTED, currentMissing: false }),
-      undefined,
-    )
-    assert.equal(decideExecutableSetting({ current: 'rtk-dev', detected: DETECTED, currentMissing: false }), undefined)
-  })
-
-  it('heals a hand-typed path that no longer exists', () => {
-    assert.equal(
-      decideExecutableSetting({ current: 'D:\\gone\\rtk.exe', detected: DETECTED, currentMissing: true }),
-      DETECTED,
-    )
+  it('never overwrites a hand-typed value, existing or not', () => {
+    assert.equal(decideExecutableSetting({ current: 'D:\\bin\\rtk.exe', detected: DETECTED }), undefined)
+    assert.equal(decideExecutableSetting({ current: 'rtk-dev', detected: DETECTED }), undefined)
+    // A missing hand-typed path is the user's to fix: detection must not
+    // silently replace it with whatever else it found on the disk.
+    assert.equal(decideExecutableSetting({ current: 'D:\\gone\\rtk.exe', detected: DETECTED }), undefined)
   })
 })

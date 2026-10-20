@@ -566,7 +566,11 @@ describe('modern settings host (SettingsForms)', () => {
     assert.ok(command, 'the /rtk command must register against the modern host')
     const result = await command.handler({ rawInput: 'reset' })
     assert.equal(result.kind, 'success')
-    assert.match(String(result.text), /user overrides cleared/, 'the report line must describe what a reset actually does')
+    assert.match(
+      String(result.text),
+      /values it inherits from the composition/,
+      'the report line must describe what a reset actually does',
+    )
     assert.deepEqual(calls.replaced, [{ ns: 'rtk', section: {} }], 'reset must target the entry the plugin runs as')
   })
 })

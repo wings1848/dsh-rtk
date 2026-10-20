@@ -6,13 +6,12 @@ import type { RtkRuntimeStatus } from './runtime-guard.js'
 export interface RtkCommandController {
   getConfig(): RtkConfig
   /**
-   * Replace the user layer wholesale; `{}` restores composition defaults.
+   * Reset the row's settings to the values inherited from the composition.
    *
-   * @returns the report line, which differs when no writable settings layer
-   * backs this instance — a silent no-op would report a reset that never
-   * happened.
+   * @returns the command result, so a refused reset is reported as an error
+   * instead of a success the user will trust.
    */
-  resetConfig(): Promise<string>
+  resetConfig(): Promise<RtkCommandResult>
   getRuntimeStatus(): RtkRuntimeStatus
   refreshRuntimeStatus(): Promise<RtkRuntimeStatus>
   getMetrics(): MetricsSummary
@@ -174,7 +173,7 @@ export function createRtkCommand(controller: RtkCommandController): {
           return { kind: 'success', text: 'dsh-rtk: savings counters cleared.' }
 
         case 'reset':
-          return { kind: 'success', text: await controller.resetConfig() }
+          return controller.resetConfig()
 
         case 'help':
           return { kind: 'success', text: HELP_TEXT }
