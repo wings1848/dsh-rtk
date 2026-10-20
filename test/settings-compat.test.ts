@@ -196,6 +196,69 @@ describe('modern settings host (dsh 0.1.7)', () => {
   })
 })
 
+describe('auto-detected executable write-back', () => {
+  /** A modern form surface that records path-addressed edits. */
+  function mutableForms(options: { writable?: boolean; fail?: boolean } = {}) {
+    const ops: Array<{ ns: string; ops: readonly object[] }> = []
+    const forms = {
+      describe: () => [],
+      ...(options.writable === undefined ? {} : { writable: options.writable }),
+      mutate: async (ns: string, next: readonly object[]) => {
+        if (options.fail === true) throw new Error('Configuration for "rtk" is overridden by a home patch')
+        ops.push({ ns, ops: next })
+      },
+      replace: async () => {},
+    }
+    return { forms, ops }
+  }
+
+  it('writes exactly one field through mutate', async () => {
+    const { forms, ops } = mutableForms()
+    const bridge = createSettingsBridge(
+      fakeContext({ settings: forms }, { fiber: { entry: { options: { id: 'rtk' } } } }).ctx,
+      {},
+    )
+    assert.equal(bridge.writable, true)
+    assert.equal(await bridge.persistRtkExecutable('C:\\tools\\rtk.exe'), true)
+    assert.deepEqual(ops, [
+      { ns: 'rtk', ops: [{ op: 'set', path: ['rtkExecutable'], value: 'C:\\tools\\rtk.exe' }] },
+    ], 'a wholesale replace would pin every other field as a user override')
+  })
+
+  it('reports a refused write without throwing', async () => {
+    const { forms } = mutableForms({ fail: true })
+    const bridge = createSettingsBridge(
+      fakeContext({ settings: forms }, { fiber: { entry: { options: { id: 'rtk' } } } }).ctx,
+      {},
+    )
+    assert.equal(await bridge.persistRtkExecutable(''), false)
+  })
+
+  it('respects a read-only profile', async () => {
+    const { forms } = mutableForms({ writable: false })
+    const bridge = createSettingsBridge(
+      fakeContext({ settings: forms }, { fiber: { entry: { options: { id: 'rtk' } } } }).ctx,
+      {},
+    )
+    assert.equal(bridge.writable, false)
+    assert.equal(await bridge.persistRtkExecutable('C:\\tools\\rtk.exe'), false)
+  })
+
+  it('stays runtime-only where the generation has no path-addressed write', async () => {
+    const forms = { describe: () => [], replace: async () => {} }
+    const modern = createSettingsBridge(
+      fakeContext({ settings: forms }, { fiber: { entry: { options: { id: 'rtk' } } } }).ctx,
+      {},
+    )
+    assert.equal(modern.writable, false)
+    assert.equal(await modern.persistRtkExecutable(''), false)
+
+    const legacy = createSettingsBridge(fakeContext({ settings: { register: () => ({ get: () => ({}), watch: () => () => {}, replace: async () => {} }) } }).ctx, {})
+    assert.equal(legacy.writable, false)
+    assert.equal(await legacy.persistRtkExecutable(''), false)
+  })
+})
+
 describe('unknown settings generations', () => {
   it('degrades to composition-only configuration, without throwing', async () => {
     for (const settings of [{}, { describe: 42 }, Object.create(null)]) {

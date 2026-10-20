@@ -26,6 +26,10 @@ export interface SettingsBridge {
   read(): RtkConfig
   /** Observe committed configuration changes; returns a disposer. */
   onChange(callback: () => void): () => void
+  /** Whether {@link persistRtkExecutable} can store a value here. */
+  readonly writable: boolean
+  /** Store an auto-detected rtk path (empty string means "not found"); reports whether it stuck. */
+  persistRtkExecutable(value: string): Promise<boolean>
   /** Restore the user layer to the composition's values; returns the report line. */
   reset(): Promise<string>
 }
@@ -81,6 +85,8 @@ function createCompositionBridge(rawConfig: unknown, note: string): SettingsBrid
     note,
     read: () => normalizeConfig(rawConfig),
     onChange: () => () => {},
+    writable: false,
+    persistRtkExecutable: async () => false,
     reset: async () => COMPOSITION_RESET,
   }
 }
@@ -89,6 +95,17 @@ function createCompositionBridge(rawConfig: unknown, note: string): SettingsBrid
 
 interface ModernForms {
   replace(ns: string, section: object, expectedRevision?: number): Promise<void>
+  /** Path-addressed field edits, the only safe way to touch one field in place. */
+  mutate(ns: string, ops: readonly SettingsPathOp[], expectedRevision?: number): Promise<void>
+  /** False when the active profile layer refuses writes (a read-only home patch). */
+  writable?: boolean
+}
+
+/** One path-addressed edit, as the settings service takes it. */
+interface SettingsPathOp {
+  op: 'set'
+  path: readonly string[]
+  value: unknown
 }
 
 /**
@@ -111,6 +128,7 @@ function ownEntryId(ctx: Context): string | undefined {
 function createModernBridge(ctx: Context, rawConfig: unknown, settings: Record<string, unknown>): SettingsBridge {
   const forms = settings as unknown as ModernForms
   const ns = ownEntryId(ctx)
+  const canWrite = ns !== undefined && typeof forms.mutate === 'function' && forms.writable !== false
   return {
     note:
       ns === undefined
@@ -121,6 +139,20 @@ function createModernBridge(ctx: Context, rawConfig: unknown, settings: Record<s
     // the cached copy and the prompt note.
     read: () => normalizeConfig(rawConfig),
     onChange: (callback) => listen(ctx, 'loader/volatile-update', () => callback()),
+    writable: canWrite,
+    persistRtkExecutable: async (value) => {
+      if (!canWrite || ns === undefined) return false
+      try {
+        // Path-addressed, so the write touches exactly one field: a wholesale
+        // replace would also rewrite every other field into the user layer.
+        await forms.mutate(ns, [{ op: 'set', path: ['rtkExecutable'], value }])
+        return true
+      } catch {
+        // A read-only profile, a stale revision or an entry without editable
+        // fields: filling a convenience field in is never worth a failure.
+        return false
+      }
+    },
     reset: async () => {
       if (ns === undefined) return COMPOSITION_RESET
       try {
@@ -157,6 +189,10 @@ function createLegacyBridge(ctx: Context, rawConfig: unknown, provider: Record<s
       note: 'the `dsh-rtk` namespace in the harness settings document',
       read: () => normalizeConfig(scope.get()),
       onChange: (callback) => scope.watch(() => callback()),
+      // The legacy provider replaces a whole section, which would pin every
+      // other field as a user override; auto-detection stays runtime-only there.
+      writable: false,
+      persistRtkExecutable: async () => false,
       reset: async () => {
         try {
           await scope.replace({})
@@ -189,6 +225,8 @@ function createFollowingBridge(ctx: Context, rawConfig: unknown, provider: Legac
   return {
     note: `the \`dsh-rtk\` namespace in the harness settings document (this instance follows it; registration failed: ${error instanceof Error ? error.message : String(error)})`,
     read,
+    writable: false,
+    persistRtkExecutable: async () => false,
     onChange: (callback) =>
       listen(ctx, 'settings/updated', ((ns: string) => {
         if (ns === 'dsh-rtk') callback()

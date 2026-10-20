@@ -25,6 +25,20 @@
 
 ### Fixed
 
+- **The rtk executable setting is filled in automatically, including on
+  Windows.** Resolution ran on every call while the `rtkExecutable` field kept
+  reading the bare name, and a Windows harness whose PATH predated the install
+  (WinGet, cargo and Scoop each add their shim directory to the *user* PATH)
+  silently failed the single `where` lookup. The resolver now asks the platform
+  command first, then checks the Windows install directories (WinGet Links,
+  `%USERPROFILE%\.cargo\bin`, `%USERPROFILE%\scoop\shims`), running each
+  candidate with `--version` before trusting it. The path it finds is written
+  back into the setting through `settings.mutate`, so the configuration page
+  shows it; when nothing is found the field is written empty. Only values the
+  plugin owns (empty, the shipped `rtk` default, its own earlier write, or a
+  path that no longer exists) are rewritten, so a hand-typed value survives, and
+  a read-only profile (a home-patch row) refuses the write without disturbing the
+  runtime.
 - `/rtk <subcommand>` was delivered to the model as a chat message: the command
   definition declared no `input`, and the harness client only routes a
   space-argument line to a command that declares one (bare `/rtk` worked because

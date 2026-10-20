@@ -446,3 +446,37 @@ pwsh 真机执行、grep 超限时的真实会话 e2e、`/rtk` 命令面与 sett
 
 - 旧组合「enabled=true + filtering 关」映射为 `budget`（保字符上限、不碰源码）；旧 `smartTruncate` 用户的丢行行为不复存在。
 - 设置页条目由 26 个控件变为 5 个；字段一旦删除，用户层里残留的旧键不会报错，但也不会再生效。
+
+## 16. rtk 路径自动探测与写回设置项（2026-10-20）
+
+### 16.1 结论
+
+- 根因两条：①探测只在调用时做一次 PATH 解析（Windows 用 `where`，超时 1 s），没有任何已知安装目录回退，宿主进程 PATH 早于 rtk 安装时（WinGet / cargo / scoop 只改用户 PATH）静默失败；②解析结果只进运行时状态，从不写回设置项，所以「rtk 路径」始终显示 `rtk` 或空。
+- `src/rtk-executable.ts`：`resolveRtkExecutable` 先按平台解析器查找；Windows 上解析失败且名字是自动态（空、`rtk`、或已失效的路径）时，依次尝试 `%LOCALAPPDATA%\Microsoft\WinGet\Links\rtk.exe`、`%USERPROFILE%\.cargo\bin\rtk.exe`、`%USERPROFILE%\scoop\shims\rtk.exe`，每个候选先判存在再跑 `--version` 验证；命中记 resolver=`candidate`。手填的名字/路径不参与候选回退。
+- 配置的路径已不存在时视为陈旧值，回落为按裸名 `rtk` 重新查找（升级/卸载后自愈）。
+- `decideExecutableSetting` 只接管插件自己的值：空、默认 `rtk`、上次自动写入值、或已失效的路径；手填值不动。找不到时写空串（自动态）。
+- `src/settings-compat.ts` 增加 `writable` 与 `persistRtkExecutable`：现代宿主用 `settings.mutate(ns, [{ op: 'set', path: ['rtkExecutable'], value }])` 只写一个字段；旧 provider 与组合层不写（旧 provider 的 `replace` 会把其余字段整体落到用户层）；只读 profile 抛错一律吞掉，不影响改写/压缩。
+- `src/index.ts` 在 `apply` 时与每次 `refreshRuntimeStatus`（含 `/rtk verify`）后同步一次；写成功后重读配置，失败不产生用户可见错误。
+- `normalizeConfig` 保留显式空串（自动态）；字段缺失仍回落默认 `rtk`。
+
+### 16.2 证据
+
+| 标准 | 命令 | 实测 |
+|---|---|---|
+| 类型检查 | `node --run typecheck` | 退出 0、无输出 |
+| 全量测试 | `node --run check` | `tests 199 / pass 199 / fail 0`（新增 20 项） |
+| 本机真实解析 | `resolveRtkExecutable({ configured: 'rtk' })` | `resolver: where`，`resolvedPath: C:\\Users\\lenovo\\AppData\\Local\\Microsoft\\WinGet\\Links\\rtk.exe` |
+| 回退候选真实命中 | 同函数，`resolverCommand: 'no-such-resolver-xyz'` | `resolver: candidate`，同一 WinGet 路径（存在判定 + `--version` 验证后命中） |
+| 陈旧路径自愈 | `resolveRtkExecutable({ configured: 'C:/stale/rtk.exe' })` | 回落按 `rtk` 查找，返回 WinGet 路径 |
+| Windows 候选清单 | `test/rtk-executable.test.ts` → `windowsRtkCandidates` | 三种安装目录按环境变量拼出；缺失变量跳过 |
+| 候选验证与顺序 | 同文件 | 存在但 `--version` 失败的候选被跳过，改取下一个；非 win32 平台一次都不探测候选 |
+| 写回决策 | 同文件 → `decideExecutableSetting` | 空/默认值被填充；找不到时写空；手填值不覆盖；已失效路径被替换 |
+| 单字段写入 | `test/settings-compat.test.ts` → `auto-detected executable write-back` | `mutate` 收到 `{ op: 'set', path: ['rtkExecutable'], value }`；只读 profile、无 `mutate` 的宿主、旧 provider 均返回 false 不抛错 |
+| 空串语义 | `test/config.test.ts` | `rtkExecutable: ''` 与全空白 → `''`；字段缺失 → 默认 `rtk` |
+
+### 16.3 已知限制
+
+- 旧 provider（dsh 0.1.5）不写回设置项：其 `replace` 是整段替换，会把其余四个字段一并记为用户覆盖；该代仍按运行时解析工作。
+- 候选目录只覆盖 WinGet、cargo、scoop 的默认位置；通过 `npm` 安装的 `.cmd` shim 不能直接 `execFile`（Windows 上无 shell 会 EINVAL），因此不在候选内。
+- 自动写入发生在插件激活与每次探测刷新时；若 profile 行位于 home patch（只读），写入被拒，表现为设置项保持原值。
+- 未在运行中的 Web 宿主实机点击验证写回后的表单刷新：宿主需把 checkout 链接进 profile 并重启。

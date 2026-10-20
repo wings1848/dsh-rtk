@@ -22,12 +22,24 @@ describe('rtk executable resolution', () => {
     assert.equal(parseExecutablePath('   \n\n'), undefined)
   })
 
-  it('uses a configured path verbatim without probing PATH', async () => {
-    const resolution = await resolveRtkExecutable({ configured: '/opt/custom/rtk' })
+  it('uses an existing configured path verbatim without probing PATH', async () => {
+    const resolution = await resolveRtkExecutable({ configured: '/opt/custom/rtk', exists: async () => true })
     assert.equal(resolution.command, '/opt/custom/rtk')
     assert.equal(resolution.resolvedPath, '/opt/custom/rtk')
     assert.equal(resolution.resolver, 'configured')
     assert.equal(resolution.warning, undefined)
+  })
+
+  it('does not trust a configured path that is gone; it looks the name up again', async () => {
+    const resolution = await resolveRtkExecutable({
+      configured: '/opt/custom/rtk',
+      platform: 'linux',
+      resolverCommand: 'definitely-not-a-real-resolver',
+      exists: async () => false,
+    })
+    assert.equal(resolution.command, 'rtk', 'a stale path must not be handed to the probe')
+    assert.equal(resolution.resolver, 'which')
+    assert.match(String(resolution.warning), /could not resolve rtk/)
   })
 
   it('falls back to the bare name when the lookup fails, without throwing', async () => {

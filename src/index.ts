@@ -13,7 +13,7 @@ import { READ_COMPACTION_BANNER_PREFIX, compactToolResult } from './compact/inde
 import { parseBashResult, renderBashResult } from './compact/dsh-result.js'
 import { createMetricsTracker } from './metrics.js'
 import { createRtkCommand } from './command.js'
-import { resolveRtkExecutable, runExecutable } from './rtk-executable.js'
+import { decideExecutableSetting, fileExists, looksLikeRtkPath, resolveRtkExecutable, runExecutable, type RtkExecutableResolution } from './rtk-executable.js'
 import { applyRtkHistoryScope, resolveRtkRewrite, type ShellKind } from './rtk-rewrite.js'
 import { isStatusStale, shouldRequireRtkAvailability, shouldSkipRewrite, type RtkRuntimeStatus } from './runtime-guard.js'
 
@@ -164,6 +164,45 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
     disposeNote = undefined
   }, 'dsh-rtk.prompt-note')
 
+  /** The rtkExecutable value this plugin wrote itself on an earlier pass. */
+  let autoPersistedExecutable: string | undefined
+  let syncingExecutable = false
+
+  /**
+   * Fill the rtk executable setting in from detection.
+   *
+   * The setting is what the configuration page shows, so a path the plugin
+   * found must land there — until this existed, every call resolved rtk while
+   * the field kept reading the bare name, and a Windows harness whose PATH
+   * missed the install directory showed "not found" with no hint of the real
+   * path. A found path is written, an empty value is written when nothing was
+   * found, and a hand-typed value is never touched. A settings layer that
+   * refuses writes costs this convenience only.
+   */
+  async function syncDetectedExecutable(resolution?: RtkExecutableResolution): Promise<void> {
+    if (syncingExecutable) return
+    syncingExecutable = true
+    try {
+      const current = config.rtkExecutable
+      const resolved = resolution ?? (await resolveRtkExecutable({ configured: current }))
+      const currentMissing = looksLikeRtkPath(current) && !(await fileExists(current))
+      const next = decideExecutableSetting({
+        current,
+        ...(resolved.resolvedPath === undefined ? {} : { detected: resolved.resolvedPath }),
+        ...(autoPersistedExecutable === undefined ? {} : { autoWritten: autoPersistedExecutable }),
+        currentMissing,
+      })
+      if (next === undefined) return
+      if (!(await bridge.persistRtkExecutable(next))) return
+      autoPersistedExecutable = next
+      config = bridge.read()
+    } catch {
+      // Detection is a convenience; a failure here must never reach the user.
+    } finally {
+      syncingExecutable = false
+    }
+  }
+
   async function refreshRuntimeStatus(): Promise<RtkRuntimeStatus> {
     const resolution = await resolveRtkExecutable({ configured: config.rtkExecutable })
     const probe = await runExecutable(resolution.command, ['--version'], { timeoutMs: 5000 })
@@ -182,6 +221,9 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
             ...base,
             lastError: (probe.stderr || probe.stdout).replace(/\s+/g, ' ').trim() || `exit ${probe.code}`,
           }
+    // The probe already resolved a real path; keep the setting in step so the
+    // configuration page shows it (and shows "empty" when rtk is gone).
+    await syncDetectedExecutable(resolution)
     return runtimeStatus
   }
 
@@ -380,6 +422,10 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
     })
     ctx.effect(() => commands.register(command), 'dsh-rtk.command')
   }
+
+  // Fill the executable setting in once per activation, so the configuration
+  // page shows where rtk actually lives without waiting for a first command.
+  if (bridge.writable) void syncDetectedExecutable()
 }
 
 /**

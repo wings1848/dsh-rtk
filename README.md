@@ -152,6 +152,8 @@ Every field is optional; defaults are shown.
 > `budget`). Every other removed switch is fixed at its previous default; spill
 > deferral is detected from the mounted service instead of configured.
 
+The `rtkExecutable` field is **auto-detected**: on load the plugin looks the name up on PATH, and on Windows it also checks the usual WinGet, cargo and Scoop install directories (each candidate is verified with `--version`), then writes the absolute path it found back into the setting. When nothing is found the field is written empty, which is the auto state; a hand-typed value is never overwritten.
+
 The configuration is also editable live in the harness settings document, and takes effect without a restart. Where it appears depends on the harness generation: on dsh 0.1.7+ the row shows up as its own settings entry, named after the composition row's id (the example above: `rtk`), with every field editable; on dsh 0.1.5 it is the `dsh-rtk` namespace. Either way a composition `config:` block supplies the base layer and the settings document supplies the user layer on top — `/rtk path` reports which one this plugin can see. A settings service of an unknown generation costs the live editing only: the plugin degrades to composition-only configuration instead of failing to load.
 
 > **Where the row lives decides whether settings are writable (dsh 0.1.7+).** A row in the home patch (`~/.dsh/cordis.patch.yml`) is read-only there: the service refuses writes a lower layer would override, and `/rtk reset` reports that refusal honestly. Put the row in a profile composition to keep live editing.
