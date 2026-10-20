@@ -33,27 +33,27 @@ function parse(raw: unknown): Record<string, unknown> {
 describe('Config schema on real schemastery', () => {
   it('loads, fills defaults, and wraps every top-level field in a live reference', () => {
     const value = parse({})
-    for (const field of ['enabled', 'mode', 'rtkExecutable', 'outputCompaction']) {
+    for (const field of ['mode', 'compact', 'maxChars', 'readCompaction', 'rtkExecutable']) {
       assert.ok(isVolatile(value[field]), `field ${field} must be live-editable (a Volatile reference)`)
     }
   })
 
   it('commits edits into the references that normalizeConfig reads', () => {
-    const value = parse({ outputCompaction: { truncate: { maxChars: 7000 } } })
-    assert.equal(normalizeConfig(value).outputCompaction.truncate.maxChars, 7000)
+    const value = parse({ maxChars: 7000 })
+    assert.equal(normalizeConfig(value).maxChars, 7000)
 
-    const enabled = value['enabled'] as { get(): unknown }
-    assert.equal(enabled.get(), true)
-    ;(value['enabled'] as Record<symbol, (next: unknown) => void>)[WRITE](false)
-    assert.equal(normalizeConfig(value).enabled, false, 'the committed edit must be visible through normalizeConfig')
+    const mode = value['mode'] as { get(): unknown }
+    assert.equal(mode.get(), 'rewrite')
+    ;(value['mode'] as Record<symbol, (next: unknown) => void>)[WRITE]('off')
+    assert.equal(normalizeConfig(value).mode, 'off', 'the committed edit must be visible through normalizeConfig')
   })
 
-  it('keeps a whole subtree behind one reference, so nested fields inherit editability', () => {
+  it('fills the documented defaults into the live references', () => {
     const value = parse({})
-    const compaction = value['outputCompaction'] as { get(): unknown }
-    assert.equal(isVolatile(compaction.get()), false, 'the subtree itself is plain data behind the reference')
-    const subtree = compaction.get() as Record<string, unknown>
-    assert.equal((subtree['truncate'] as { maxChars: number }).maxChars, 12000)
+    assert.equal((value['compact'] as { get(): unknown }).get(), true)
+    assert.equal((value['maxChars'] as { get(): unknown }).get(), 12000)
+    assert.equal((value['readCompaction'] as { get(): unknown }).get(), 'none')
+    assert.equal((value['rtkExecutable'] as { get(): unknown }).get(), 'rtk')
   })
 })
 

@@ -104,7 +104,7 @@ describe('compaction preserves the harness contract', () => {
 
   it('refuses to cut through a marker when truncating', () => {
     const filler = Array.from({ length: 4000 }, (_, index) => `line ${index} ${'x'.repeat(40)}`).join('\n')
-    const small = normalizeConfig({ outputCompaction: { truncate: { maxChars: 1000 } } })
+    const small = normalizeConfig({ maxChars: 1000 })
     const outcome = compactToolResult({ toolName: 'bash', args: { command: 'echo hi' }, content: [{ type: 'text', text: `${filler}\n[exit code: 7]` }] }, small)
     const text = (outcome.content as Array<{ text: string }>)[0]?.text ?? ''
     assert.ok(text.length <= 1000 + 64, `expected a bounded result, got ${text.length} chars`)

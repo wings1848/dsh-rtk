@@ -29,7 +29,7 @@
 - 有 rtk 等价命令的调用会在派发前被改写；rtk 不支持的命令原样执行。
 - **rtk 始终是唯一事实来源。** 插件不带自己的重写表，而是通过 `rtk rewrite` 询问已安装的二进制，所以支持范围跟随你装的 rtk 版本。
 - **`rewrite` 与 `suggest` 两种模式。** `rewrite` 替换命令；`suggest` 原样执行并报告本可使用的等价命令。
-- **运行时守卫。** `guardWhenRtkMissing`（默认开）下，无法确认 rtk 可用的调用会执行原命令——缺少优化器永远不会挡住工作。
+- **运行时守卫。** 无法确认 rtk 可用的调用会执行原命令——缺少优化器永远不会挡住工作。
 - 被改写的命令会带上隔离的 `RTK_DB_PATH`，rtk 的使用历史不会落进工作目录。
 
 ### 输出压缩
@@ -44,8 +44,7 @@
 | Git 压缩 | 归纳 `git status`、`git diff`、`git log` |
 | Linter 聚合 | 统计问题数并按规则与文件排名 |
 | 搜索分组 | 按文件归组 `grep` 风格匹配 |
-| 源码过滤 | `none` / `minimal` / `aggressive` 注释与空白处理（默认关） |
-| 智能截断 | 丢行时保留签名与 import（默认关） |
+| read 压缩 | `readCompaction: minimal` 删普通注释；`aggressive` 只留 import 与签名（默认关） |
 | 硬截断 | 最终字符预算 |
 
 有两条性质是**硬性不变量**：
@@ -58,8 +57,7 @@
 
 `dsh-spill-policy` 挂载时，它会把完整结果落盘、上下文里只留头尾预览——这种截断是**可恢复的**。而本插件的硬截断不可恢复，且**跑在前面**：默认 12000 字符的阈值远低于 spill 的 50000 字节阈值，于是 spill 根本看不到大结果，那个本可以让读者看到剩余内容的落盘文件也就永远不会产生。
 
-`deferToHarnessSpill` 开启时（默认），只要 spill 服务在场，插件就关掉自己的截断，让失控命令的输出保持可读。设为 `false` 则无论 spill 是否挂载都保留插件自己的上限。
-
+只要 spill 服务在场，插件就关掉自己的截断，让失控命令的输出保持可读。是否让位只看服务在不在——没有开关。
 
 ### 会话统计
 
@@ -83,7 +81,7 @@ dsh plugin --profile web add @wingsbutterfly/dsh-rtk
 
 装完重启宿主——profile 行在启动时挂载。
 
-> **作用面：这行在 host 平面，覆盖该 profile 下的所有会话。** 行在宿主进程里只实例化一次，它的 `tools/execute` / `tools/post-execute` 监听器是进程级的：命令改写与输出压缩对该 profile 下的每个 agent、preset、子代理都生效。bundle patch 无法表达「按 preset 精细开启」——patch 只能往根行列表追加行，改不了 `preset-*.config.plugins`。要收窄就用行自带的开关：`enabled: false`，或 `mode: suggest` 只报告不改写。
+> **作用面：这行在 host 平面，覆盖该 profile 下的所有会话。** 行在宿主进程里只实例化一次，它的 `tools/execute` / `tools/post-execute` 监听器是进程级的：命令改写与输出压缩对该 profile 下的每个 agent、preset、子代理都生效。bundle patch 无法表达「按 preset 精细开启」——patch 只能往根行列表追加行，改不了 `preset-*.config.plugins`。要收窄就用行自带的开关：`mode: off`，或 `mode: suggest` 只报告不改写。
 
 ### 只想按 preset 开
 
@@ -103,7 +101,6 @@ ln -s /path/to/dsh-rtk ~/.dsh/node_modules/@wingsbutterfly/dsh-rtk
 ```yaml
 - id: rtk
   config:
-    enabled: true
     mode: rewrite
     rtkExecutable: /opt/rtk/bin/rtk
 ```
@@ -120,41 +117,25 @@ ln -s /path/to/dsh-rtk ~/.dsh/node_modules/@wingsbutterfly/dsh-rtk
 - id: rtk
   name: '@wingsbutterfly/dsh-rtk'
   config:
-    enabled: true                    # 总开关
-    mode: rewrite                    # rewrite | suggest
-    guardWhenRtkMissing: true        # rtk 不可用时执行原命令
-    showRewriteNotifications: false  # 在结果末尾附加一行改写说明
+    mode: rewrite                    # off | rewrite | suggest
+    compact: true                    # 输出压缩总开关
+    maxChars: 12000                  # 字符预算（1000–200000）
+    readCompaction: none             # none | budget | minimal | aggressive
     rtkExecutable: rtk               # 名字或绝对路径
-    rewriteTimeoutMs: 3000           # 单次 `rtk rewrite` 的截止时间
-    compactedTools: [bash, read, grep, ops_bash, ops_grep]
-    outputCompaction:
-      enabled: true
-      stripAnsi: true
-      readCompaction:
-        enabled: false               # 有损 read 压缩；默认关，保证读到的代码是精确的
-      sourceCodeFilteringEnabled: false
-      preserveExactSkillReads: false
-      sourceCodeFiltering: none      # none | minimal | aggressive
-      aggregateTestOutput: true
-      filterBuildOutput: true
-      compactGitOutput: true
-      aggregateLinterOutput: true
-      groupSearchOutput: true
-      trackSavings: true
-      deferToHarnessSpill: true      # 把超大输出让给 harness 的 spill 策略
-      smartTruncate:
-        enabled: false
-        maxLines: 220                # 40–4000
-      truncate:
-        enabled: true
-        maxChars: 12000              # 1000–200000
 ```
+
+> **从旧 schema 升级。** 被删字段由 `normalizeConfig` 迁移，不会被静默忽略：
+> `enabled: false` → `mode: off`，`outputCompaction.enabled` → `compact`，
+> `truncate.maxChars` → `maxChars`，三个 readCompaction 字段合并为
+> `readCompaction`（关 → `none`；开启且为 `minimal`/`aggressive` → 同层级；
+> 开启但未过滤 → `budget`）。其余被删开关一律固定为原默认值；spill 让位改为
+> 按挂载的服务探测，不再配置。
 
 配置也能在 harness 设置文档里在线编辑、即时生效、无需重启。入口随宿主版本不同：dsh 0.1.7+ 上，这一行会成为设置文档里自己的条目（用组合行的 id 命名，上例即 `rtk`），每个字段都可编辑；dsh 0.1.5 上则是 `dsh-rtk` 命名空间。无论哪一代，组合的 `config:` 块提供基础层，设置文档在其上叠加用户层——`/rtk path` 会报告当前插件能看到的入口。遇到不认识的 settings 服务，插件只失去在线编辑能力、降级为「仅组合配置」继续工作，不会整个挂掉。
 
 > **行放在哪，决定设置可不可写（dsh 0.1.7+）。** home patch（`~/.dsh/cordis.patch.yml`）里的行是**只读**的：服务会拒绝被低层覆盖的写，`/rtk reset` 也会如实报告这个拒绝。想保留在线调参，就把行放进 profile 的组合里。
 
-> **为什么 `readCompaction` 默认关。** 过滤或截断 `read` 结果，可能让模型拿到的文本与文件不再一致，编辑就会失配。默认开启的每一项，要么对它归纳的正文是无损的，要么只作用于整个形态都会被替换掉的输出。
+> **为什么 `readCompaction` 默认 `none`。** 过滤或截断 `read` 结果，可能让模型拿到的文本与文件不再一致，编辑就会失配。默认开启的每一项，要么对它归纳的正文是无损的，要么只作用于整个形态都会被替换掉的输出。
 
 ## 命令
 

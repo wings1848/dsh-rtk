@@ -41,9 +41,9 @@ describe('rtk executable resolution', () => {
   })
 
   it('resolves a real binary when one is on PATH', async () => {
-    const resolution = await resolveRtkExecutable({ configured: 'sh' })
-    assert.equal(resolution.resolver, 'which')
-    assert.match(String(resolution.resolvedPath), /\/sh$/)
+    const resolution = await resolveRtkExecutable({ configured: 'node' })
+    assert.equal(resolution.resolver, resolverNameFor(process.platform))
+    assert.match(String(resolution.resolvedPath), /node(?:\.exe)?$/)
   })
 })
 
@@ -53,14 +53,13 @@ describe('runtime guard', () => {
   it('consults availability only in rewrite mode', () => {
     assert.equal(shouldRequireRtkAvailability(base), true)
     assert.equal(shouldRequireRtkAvailability(normalizeConfig({ mode: 'suggest' })), false)
-    assert.equal(shouldRequireRtkAvailability(normalizeConfig({ enabled: false })), false)
+    assert.equal(shouldRequireRtkAvailability(normalizeConfig({ mode: 'off' })), false)
   })
 
-  it('stands rewriting down when rtk is missing and the guard is on', () => {
+  it('stands rewriting down when rtk is missing, and when the plugin is off', () => {
     assert.equal(shouldSkipRewrite(base, { rtkAvailable: false }), true)
     assert.equal(shouldSkipRewrite(base, { rtkAvailable: true }), false)
-    assert.equal(shouldSkipRewrite(normalizeConfig({ guardWhenRtkMissing: false }), { rtkAvailable: false }), false)
-    assert.equal(shouldSkipRewrite(normalizeConfig({ enabled: false }), { rtkAvailable: true }), true)
+    assert.equal(shouldSkipRewrite(normalizeConfig({ mode: 'off' }), { rtkAvailable: true }), true)
   })
 
   it('treats an unprobed or old status as stale', () => {
@@ -136,8 +135,10 @@ describe('/rtk command', () => {
     for (const input of ['', '   ', 'show']) {
       const result = await command.handler({ rawInput: input })
       assert.equal(result.kind, 'success')
-      assert.match(String(result.text), /dsh-rtk: on/)
-      assert.match(String(result.text), /mode: rewrite/)
+      assert.match(String(result.text), /dsh-rtk: rewrite/)
+      assert.match(String(result.text), /compact: on/)
+      assert.match(String(result.text), /maxChars: 12000/)
+      assert.match(String(result.text), /readCompaction: none/)
       assert.match(String(result.text), /rtk binary: available/)
     }
   })
@@ -234,6 +235,6 @@ describe('/rtk command', () => {
   it('ignores case in the subcommand', async () => {
     const result = await command.handler({ rawInput: 'SHOW' })
     assert.equal(result.kind, 'success')
-    assert.match(String(result.text), /dsh-rtk: on/)
+    assert.match(String(result.text), /dsh-rtk: rewrite/)
   })
 })

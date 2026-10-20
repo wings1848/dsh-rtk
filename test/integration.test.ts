@@ -188,7 +188,7 @@ describe('apply() wiring', () => {
 
   it('does nothing at all when disabled', async () => {
     const harness = fakeContext()
-    apply(harness.ctx, normalizeConfig({ enabled: false }) as never)
+    apply(harness.ctx, normalizeConfig({ mode: 'off' }) as never)
 
     const exec = bashExecution('git status')
     let seenByBody: unknown
@@ -201,9 +201,9 @@ describe('apply() wiring', () => {
 
   it('degrades to the original command when rtk cannot be resolved', async () => {
     const harness = fakeContext()
-    // A path that cannot exist: resolution is skipped and the --version probe
-    // fails, so the guard must stand the rewrite down.
-    apply(harness.ctx, normalizeConfig({ rtkExecutable: '/nonexistent/rtk-binary' }) as never)
+    // A name that cannot resolve anywhere: the --version probe fails, so the
+    // guard must stand the rewrite down.
+    apply(harness.ctx, normalizeConfig({ rtkExecutable: 'rtk-not-installed-xyz' }) as never)
 
     const exec = bashExecution('git status')
     let seenByBody: unknown
@@ -299,8 +299,8 @@ describe('missing-rtk notice', () => {
 
   it('tells a session once, and only once, that rtk is missing', async () => {
     const harness = fakeContext()
-    // A path that cannot exist, so the guard stands every rewrite down.
-    apply(harness.ctx, normalizeConfig({ rtkExecutable: '/nonexistent/rtk-binary' }) as never)
+    // A name that cannot resolve, so the guard stands every rewrite down.
+    apply(harness.ctx, normalizeConfig({ rtkExecutable: 'rtk-not-installed-xyz' }) as never)
     const agent = { id: 'session-notice' }
 
     const first = await callOnce(harness, 'call-1', agent)
@@ -316,23 +316,12 @@ describe('missing-rtk notice', () => {
 
   it('tells a different session its own first time', async () => {
     const harness = fakeContext()
-    apply(harness.ctx, normalizeConfig({ rtkExecutable: '/nonexistent/rtk-binary' }) as never)
+    apply(harness.ctx, normalizeConfig({ rtkExecutable: 'rtk-not-installed-xyz' }) as never)
 
     await callOnce(harness, 'call-a', { id: 'session-a' })
     const other = await callOnce(harness, 'call-b', { id: 'session-b' })
     const text = other.content.map((block: { text: string }) => block.text).join('\n')
     assert.match(text, /rtk not found/, 'each session gets told independently')
-  })
-
-  it('stays quiet when the notice is switched off', async () => {
-    const harness = fakeContext()
-    apply(
-      harness.ctx,
-      normalizeConfig({ rtkExecutable: '/nonexistent/rtk-binary', notifyWhenRtkMissing: false }) as never,
-    )
-    const decision = await callOnce(harness, 'call-1', { id: 'session-quiet' })
-    const text = (decision.content ?? []).map((block: { text: string }) => block.text).join('\n')
-    assert.doesNotMatch(text, /rtk not found/)
   })
 })
 
@@ -372,20 +361,6 @@ describe('spill coordination', () => {
     const text = (decision.content ?? []).map((block: { text: string }) => block.text).join('')
     assert.ok(text.length > 0 && text.length <= 13000, `expected a bounded result, got ${text.length} chars`)
   })
-
-  it('keeps its own bound when a row opts out of deferring', async () => {
-    const harness = fakeContext({ spillStore: {} })
-    apply(
-      harness.ctx,
-      normalizeConfig({
-        outputCompaction: { deferToHarnessSpill: false, truncate: { enabled: true, maxChars: 2000 } },
-      }) as never,
-    )
-
-    const decision = await postExecute(harness)
-    const text = (decision.content ?? []).map((block: { text: string }) => block.text).join('')
-    assert.ok(text.length > 0 && text.length <= 2100, `an opted-out row must keep its budget, got ${text.length} chars`)
-  })
 })
 
 describe('settings integration', () => {
@@ -409,7 +384,7 @@ describe('settings integration', () => {
     }
 
     const harness = fakeContext({ settings })
-    apply(harness.ctx, normalizeConfig({ enabled: true, mode: 'rewrite' }) as never)
+    apply(harness.ctx, normalizeConfig({ mode: 'rewrite' }) as never)
 
     assert.deepEqual(registered.map((entry) => entry.ns), ['dsh-rtk'])
     assert.equal(watched.length, 1, 'the plugin must observe later settings edits')
@@ -471,9 +446,9 @@ describe('modern settings host (SettingsForms)', () => {
 
   it('observes live config edits committed into the running references', async () => {
     const calls = { replaced: [] as Array<{ ns: string; section: unknown }> }
-    const enabled = ref(true)
+    const mode = ref('rewrite')
     const harness = fakeContext({ settings: modernSettings(calls) })
-    const raw = { ...normalizeConfig({}), enabled }
+    const raw = { ...normalizeConfig({}), mode }
     apply(harness.ctx, raw as never)
 
     const huge = [{ type: 'text', text: 'y'.repeat(30000) }]
@@ -496,8 +471,8 @@ describe('modern settings host (SettingsForms)', () => {
 
     // The loader commits a volatile-only settings edit in place and announces
     // it; the plugin must stop compacting without a remount.
-    ;(enabled as unknown as { [key: symbol]: (next: unknown) => void })[Symbol.for('cosmokit.volatile.write')](false)
-    await harness.emit('loader/volatile-update', [['enabled']])
+    ;(mode as unknown as { [key: symbol]: (next: unknown) => void })[Symbol.for('cosmokit.volatile.write')]('off')
+    await harness.emit('loader/volatile-update', [['mode']])
 
     const after = await postExecute()
     const text = (after.content ?? []).map((block: { text: string }) => block.text).join('')

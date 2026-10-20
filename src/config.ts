@@ -1,121 +1,71 @@
 import z from '@deepseek-ai/schemastery'
 
 /**
- * How bash commands are handled.
+ * What the plugin does with a shell command.
  *
+ * - `off` — the plugin registers its listeners but takes no action: commands
+ *   run as written and results are not compacted.
  * - `rewrite` — a command with an RTK equivalent is replaced before it runs.
  * - `suggest` — the command runs unchanged; the rewrite is only reported.
  */
-export type RtkMode = 'rewrite' | 'suggest'
+export type RtkMode = 'off' | 'rewrite' | 'suggest'
 
-/** Source-code filtering strength applied to `read` output. */
-export type SourceCodeFilteringLevel = 'none' | 'minimal' | 'aggressive'
-
-/** Line-based truncation for `read` output. */
-export interface SmartTruncateConfig {
-  enabled: boolean
-  maxLines: number
-}
-
-/** Final character-budget enforcement applied to every compacted text. */
-export interface TruncateConfig {
-  enabled: boolean
-  maxChars: number
-}
-
-/** Lossy compaction for `read` output; off by default so code reads stay exact. */
-export interface ReadCompactionConfig {
-  enabled: boolean
-}
-
-/** The output-compaction pipeline's switches. */
-export interface OutputCompactionConfig {
-  enabled: boolean
-  stripAnsi: boolean
-  readCompaction: ReadCompactionConfig
-  sourceCodeFilteringEnabled: boolean
-  preserveExactSkillReads: boolean
-  sourceCodeFiltering: SourceCodeFilteringLevel
-  aggregateTestOutput: boolean
-  filterBuildOutput: boolean
-  compactGitOutput: boolean
-  aggregateLinterOutput: boolean
-  groupSearchOutput: boolean
-  trackSavings: boolean
-  /**
-   * Yield oversized results to the harness's own spill policy when it is
-   * mounted, instead of hard-truncating them first.
-   */
-  deferToHarnessSpill: boolean
-  smartTruncate: SmartTruncateConfig
-  truncate: TruncateConfig
-}
+/**
+ * Lossy `read` compaction strength.
+ *
+ * - `none` — reads stay byte-exact (the default; edits are written against them).
+ * - `budget` — only the character budget applies; source text is untouched.
+ * - `minimal` — ordinary comments are dropped, documentation comments stay.
+ * - `aggressive` — imports and signatures stay; bodies are replaced by markers.
+ */
+export type ReadCompaction = 'none' | 'budget' | 'minimal' | 'aggressive'
 
 /** The plugin's fully-resolved configuration. */
 export interface RtkConfig {
-  enabled: boolean
+  /** Master switch; `off` disables both halves. */
   mode: RtkMode
-  guardWhenRtkMissing: boolean
-  showRewriteNotifications: boolean
-  /** Whether a session is told once that rewriting is off because rtk is absent. */
-  notifyWhenRtkMissing: boolean
+  /** Whether tool results pass through the compaction pipeline. */
+  compact: boolean
+  /** Final character budget applied to compacted text. */
+  maxChars: number
+  /** `read` compaction strength. */
+  readCompaction: ReadCompaction
   /** Executable used for both `--version` probes and `rtk rewrite`. */
   rtkExecutable: string
-  /** Deadline for one `rtk rewrite` call. */
-  rewriteTimeoutMs: number
-  /** Tools whose results pass through the compaction pipeline. */
-  compactedTools: string[]
-  outputCompaction: OutputCompactionConfig
 }
 
 /** Defaults for every field; also the fallback when a layer omits one. */
 export const DEFAULT_CONFIG: RtkConfig = {
-  enabled: true,
   mode: 'rewrite',
-  guardWhenRtkMissing: true,
-  // Deliberately off, unlike pi-rtk-optimizer's equivalent flag. There the
-  // notice is a TUI toast; here it is appended to the tool result, so it would
-  // sit in the model's context on every rewritten call. The saving is the
-  // point of the plugin, and `/rtk stats` already reports what happened.
-  showRewriteNotifications: false,
-  // On: a missing binary is the one condition that silently costs the user the
-  // whole feature. The notice is emitted once per session, so its cost is
-  // bounded even though it is on by default.
-  notifyWhenRtkMissing: true,
+  compact: true,
+  maxChars: 12000,
+  // Deliberately off: filtering or truncating a `read` result can make the
+  // model's copy differ from the file, and edits are written against that copy.
+  readCompaction: 'none',
   rtkExecutable: 'rtk',
-  rewriteTimeoutMs: 3000,
-  compactedTools: ['bash', 'read', 'grep', 'ops_bash', 'ops_grep'],
-  outputCompaction: {
-    enabled: true,
-    stripAnsi: true,
-    readCompaction: { enabled: false },
-    sourceCodeFilteringEnabled: false,
-    preserveExactSkillReads: false,
-    sourceCodeFiltering: 'none',
-    aggregateTestOutput: true,
-    filterBuildOutput: true,
-    compactGitOutput: true,
-    aggregateLinterOutput: true,
-    groupSearchOutput: true,
-    trackSavings: true,
-    // The harness spill policy truncates recoverably (full output on disk,
-    // head/tail preview inline); this plugin's hard truncation does not. It
-    // also runs first, so at 12 000 characters it fires far below spill's
-    // threshold and spill never sees a large result. Deferring is the default;
-    // `false` keeps this plugin's own bound even when spill is mounted.
-    deferToHarnessSpill: true,
-    smartTruncate: { enabled: false, maxLines: 220 },
-    truncate: { enabled: true, maxChars: 12000 },
-  },
 }
-
-const SOURCE_CODE_FILTERING_LEVELS: readonly SourceCodeFilteringLevel[] = ['none', 'minimal', 'aggressive']
 
 /** Bounds published in the configuration catalog and enforced during normalization. */
 export const BOUNDS = {
-  maxLines: { min: 40, max: 4000 },
   maxChars: { min: 1000, max: 200000 },
 } as const
+
+/**
+ * Deadline for one `rtk rewrite` call.
+ *
+ * Not configurable any more: rtk answers locally, and a hung probe is already
+ * bounded by the call's own signal. The value matches the previous default.
+ */
+export const REWRITE_TIMEOUT_MS = 3000
+
+/**
+ * Tool names whose text results pass through the compaction pipeline.
+ *
+ * Not configurable any more: these are exactly the tools with a compactor. The
+ * list is fixed so a name that has no matching branch cannot silently do
+ * nothing.
+ */
+export const COMPACTED_TOOLS: readonly string[] = ['bash', 'read', 'grep', 'ops_bash', 'ops_grep']
 
 /**
  * Mark one schema field live-editable at runtime (schemastery's `volatile` role).
@@ -124,9 +74,7 @@ export const BOUNDS = {
  * ship different schemastery lines: `Schema.prototype.volatile` exists from
  * 3.18.4 on, and a schema built against 3.18.2 must stay loadable there. The
  * old settings provider registers the whole namespace regardless; the modern
- * settings page only lists fields carrying this mark. Adding a top-level field
- * to {@link Config} means wrapping it here once — fields added *inside*
- * `outputCompaction` inherit editability from the container.
+ * settings page only lists fields carrying this mark.
  *
  * The return type deliberately stays `T`: `RtkConfig` is hand-written and
  * normalized separately, so the volatile wrapper never leaks into the types
@@ -150,67 +98,30 @@ export function editable<T>(schema: T): T {
  * a hand-written one would have to restate every nested field.
  */
 export const Config = z.object({
-  enabled: editable(z.boolean().default(DEFAULT_CONFIG.enabled).description('Master switch for command rewriting and output compaction.')),
   mode: editable(
     z
-      .union([z.const('rewrite'), z.const('suggest')])
+      .union([z.const('off'), z.const('rewrite'), z.const('suggest')])
       .default(DEFAULT_CONFIG.mode)
-      .description('`rewrite` replaces a supported command; `suggest` only reports the equivalent.'),
+      .description('`off` disables both halves; `rewrite` replaces a supported command; `suggest` only reports the equivalent.'),
   ),
-  guardWhenRtkMissing: editable(
-    z
-      .boolean()
-      .default(DEFAULT_CONFIG.guardWhenRtkMissing)
-      .description('Run the original command unchanged when the rtk executable is unavailable.'),
+  compact: editable(
+    z.boolean().default(DEFAULT_CONFIG.compact).description('Compact tool output before it reaches the model.'),
   ),
-  showRewriteNotifications: editable(
-    z
-      .boolean()
-      .default(DEFAULT_CONFIG.showRewriteNotifications)
-      .description('Record rewrite decisions so they are visible in the session log.'),
+  maxChars: editable(
+    z.natural().default(DEFAULT_CONFIG.maxChars).description('Character budget for compacted text (1000–200000).'),
   ),
-  notifyWhenRtkMissing: editable(
+  readCompaction: editable(
     z
-      .boolean()
-      .default(DEFAULT_CONFIG.notifyWhenRtkMissing)
-      .description('Tell each session once that command rewriting is off because rtk is not installed.'),
+      .union([z.const('none'), z.const('budget'), z.const('minimal'), z.const('aggressive')])
+      .default(DEFAULT_CONFIG.readCompaction)
+      .description('`none` keeps reads exact; `budget` truncates only; `minimal` also drops ordinary comments; `aggressive` keeps imports and signatures.'),
   ),
-  rtkExecutable: editable(z.string().default(DEFAULT_CONFIG.rtkExecutable).description('Executable name or path for rtk.')),
-  rewriteTimeoutMs: editable(z.natural().default(DEFAULT_CONFIG.rewriteTimeoutMs).description('Deadline in milliseconds for one `rtk rewrite` call.')),
-  compactedTools: editable(
+  rtkExecutable: editable(
     z
-      .array(z.string())
-      .default([...DEFAULT_CONFIG.compactedTools])
-      .description('Tool names whose text results pass through the compaction pipeline.'),
+      .string()
+      .default(DEFAULT_CONFIG.rtkExecutable)
+      .description('Executable name or absolute path for rtk; empty means auto-detect (the plugin fills in the path it finds).'),
   ),
-  outputCompaction: editable(
-    z
-      .object({
-      enabled: z.boolean().default(true),
-      stripAnsi: z.boolean().default(true),
-      readCompaction: z.object({ enabled: z.boolean().default(false) }),
-      sourceCodeFilteringEnabled: z.boolean().default(false),
-      preserveExactSkillReads: z.boolean().default(false),
-      sourceCodeFiltering: z
-        .union([z.const('none'), z.const('minimal'), z.const('aggressive')])
-        .default(DEFAULT_CONFIG.outputCompaction.sourceCodeFiltering),
-      aggregateTestOutput: z.boolean().default(true),
-      filterBuildOutput: z.boolean().default(true),
-      compactGitOutput: z.boolean().default(true),
-      aggregateLinterOutput: z.boolean().default(true),
-      groupSearchOutput: z.boolean().default(true),
-      trackSavings: z.boolean().default(true),
-      deferToHarnessSpill: z.boolean().default(true),
-      smartTruncate: z.object({
-        enabled: z.boolean().default(false),
-        maxLines: z.natural().default(DEFAULT_CONFIG.outputCompaction.smartTruncate.maxLines),
-      }),
-      truncate: z.object({
-        enabled: z.boolean().default(true),
-        maxChars: z.natural().default(DEFAULT_CONFIG.outputCompaction.truncate.maxChars),
-      }),
-    })
-    .default(DEFAULT_CONFIG.outputCompaction)),
 })
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -256,75 +167,89 @@ function pickNumber(value: unknown, fallback: number, min: number, max: number):
   return Math.min(max, Math.max(min, Math.floor(value)))
 }
 
-function pickString(value: unknown, fallback: string): string {
-  return typeof value === 'string' && value.trim() ? value : fallback
+/**
+ * Resolve the rtk executable setting.
+ *
+ * A missing field keeps the shipped default, but an explicit empty string is
+ * preserved: it is the "auto-detect" state the plugin writes when no rtk was
+ * found, and the form must be able to show it.
+ */
+function pickExecutable(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : DEFAULT_CONFIG.rtkExecutable
 }
 
-function pickStringList(value: unknown, fallback: readonly string[]): string[] {
-  if (!Array.isArray(value)) return [...fallback]
-  const names = value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
-  return names.length > 0 ? names : [...fallback]
+const MODES: readonly RtkMode[] = ['off', 'rewrite', 'suggest']
+const READ_COMPACTIONS: readonly ReadCompaction[] = ['none', 'budget', 'minimal', 'aggressive']
+
+function isMode(value: unknown): value is RtkMode {
+  return typeof value === 'string' && (MODES as readonly string[]).includes(value)
+}
+
+function isReadCompaction(value: unknown): value is ReadCompaction {
+  return typeof value === 'string' && (READ_COMPACTIONS as readonly string[]).includes(value)
+}
+
+/**
+ * Resolve the master switch, migrating the retired `enabled` field.
+ *
+ * Every released configuration carried `enabled`; it now folds into `mode`.
+ * An explicit `enabled: false` still means "off", so a patch or settings layer
+ * written for the old schema keeps its intent instead of silently turning the
+ * plugin back on.
+ */
+function normalizeMode(root: Record<string, unknown>): RtkMode {
+  if (root.enabled === false) return 'off'
+  return isMode(root.mode) ? root.mode : DEFAULT_CONFIG.mode
+}
+
+/**
+ * Resolve read compaction, migrating the retired `outputCompaction` fields.
+ *
+ * The old shape needed three fields to express one behavior: the enable flag,
+ * the filtering flag, and the filtering level. Their combination maps onto the
+ * single enum:
+ *
+ * - `readCompaction.enabled !== true` → `none`
+ * - enabled with filtering at `minimal` / `aggressive` → the same level
+ * - enabled without filtering (level `none`, or the filtering flag off) →
+ *   `budget`, which keeps the character bound but leaves source text alone
+ */
+function normalizeReadCompaction(root: Record<string, unknown>, legacy: Record<string, unknown>): ReadCompaction {
+  if (isReadCompaction(root.readCompaction)) return root.readCompaction
+
+  const legacyRead = asRecord(legacy.readCompaction)
+  if (legacyRead.enabled !== true) return DEFAULT_CONFIG.readCompaction
+
+  const filtering = legacy.sourceCodeFilteringEnabled === true
+  if (filtering && legacy.sourceCodeFiltering === 'minimal') return 'minimal'
+  if (filtering && legacy.sourceCodeFiltering === 'aggressive') return 'aggressive'
+  return 'budget'
 }
 
 /**
  * Normalize arbitrary configuration into a complete {@link RtkConfig}.
  *
  * The loader already validates the composition's `config:` block, but this
- * entry is also reachable from tests, from `apply()` called directly, and from
- * a runtime patch, so every field is re-derived rather than trusted. Numbers
- * are clamped to {@link BOUNDS} so a hand-edited value cannot disable the
+ * entry is also reachable from tests, from `apply()` called directly, from a
+ * runtime patch, and from settings layers written for the previous schema, so
+ * every field is re-derived rather than trusted. Retired fields are migrated
+ * (see {@link normalizeMode} and {@link normalizeReadCompaction}); numbers are
+ * clamped to {@link BOUNDS} so a hand-edited value cannot disable the
  * pipeline's safeguards by accident. Volatile references (the modern harness's
  * live-editable fields) are read through on the way, so callers on either
  * harness generation can hand in whatever their config object holds.
  */
 export function normalizeConfig(raw: unknown): RtkConfig {
   const root = asRecord(plainize(raw))
-  const compaction = asRecord(root.outputCompaction)
-  const readCompaction = asRecord(compaction.readCompaction)
-  const smartTruncate = asRecord(compaction.smartTruncate)
-  const truncate = asRecord(compaction.truncate)
-
-  const mode = root.mode === 'suggest' ? 'suggest' : 'rewrite'
-  const filtering = SOURCE_CODE_FILTERING_LEVELS.includes(compaction.sourceCodeFiltering as SourceCodeFilteringLevel)
-    ? (compaction.sourceCodeFiltering as SourceCodeFilteringLevel)
-    : DEFAULT_CONFIG.outputCompaction.sourceCodeFiltering
+  const legacy = asRecord(root.outputCompaction)
+  const legacyTruncate = asRecord(legacy.truncate)
+  const rawMaxChars = root.maxChars !== undefined ? root.maxChars : legacyTruncate.maxChars
 
   return {
-    enabled: pickBoolean(root.enabled, DEFAULT_CONFIG.enabled),
-    mode,
-    guardWhenRtkMissing: pickBoolean(root.guardWhenRtkMissing, DEFAULT_CONFIG.guardWhenRtkMissing),
-    showRewriteNotifications: pickBoolean(root.showRewriteNotifications, DEFAULT_CONFIG.showRewriteNotifications),
-    notifyWhenRtkMissing: pickBoolean(root.notifyWhenRtkMissing, DEFAULT_CONFIG.notifyWhenRtkMissing),
-    rtkExecutable: pickString(root.rtkExecutable, DEFAULT_CONFIG.rtkExecutable),
-    rewriteTimeoutMs: pickNumber(root.rewriteTimeoutMs, DEFAULT_CONFIG.rewriteTimeoutMs, 100, 60000),
-    compactedTools: pickStringList(root.compactedTools, DEFAULT_CONFIG.compactedTools),
-    outputCompaction: {
-      enabled: pickBoolean(compaction.enabled, DEFAULT_CONFIG.outputCompaction.enabled),
-      stripAnsi: pickBoolean(compaction.stripAnsi, DEFAULT_CONFIG.outputCompaction.stripAnsi),
-      readCompaction: {
-        enabled: pickBoolean(readCompaction.enabled, DEFAULT_CONFIG.outputCompaction.readCompaction.enabled),
-      },
-      sourceCodeFilteringEnabled: pickBoolean(
-        compaction.sourceCodeFilteringEnabled,
-        DEFAULT_CONFIG.outputCompaction.sourceCodeFilteringEnabled,
-      ),
-      preserveExactSkillReads: pickBoolean(compaction.preserveExactSkillReads, DEFAULT_CONFIG.outputCompaction.preserveExactSkillReads),
-      sourceCodeFiltering: filtering,
-      aggregateTestOutput: pickBoolean(compaction.aggregateTestOutput, DEFAULT_CONFIG.outputCompaction.aggregateTestOutput),
-      filterBuildOutput: pickBoolean(compaction.filterBuildOutput, DEFAULT_CONFIG.outputCompaction.filterBuildOutput),
-      compactGitOutput: pickBoolean(compaction.compactGitOutput, DEFAULT_CONFIG.outputCompaction.compactGitOutput),
-      aggregateLinterOutput: pickBoolean(compaction.aggregateLinterOutput, DEFAULT_CONFIG.outputCompaction.aggregateLinterOutput),
-      groupSearchOutput: pickBoolean(compaction.groupSearchOutput, DEFAULT_CONFIG.outputCompaction.groupSearchOutput),
-      trackSavings: pickBoolean(compaction.trackSavings, DEFAULT_CONFIG.outputCompaction.trackSavings),
-      deferToHarnessSpill: pickBoolean(compaction.deferToHarnessSpill, DEFAULT_CONFIG.outputCompaction.deferToHarnessSpill),
-      smartTruncate: {
-        enabled: pickBoolean(smartTruncate.enabled, DEFAULT_CONFIG.outputCompaction.smartTruncate.enabled),
-        maxLines: pickNumber(smartTruncate.maxLines, DEFAULT_CONFIG.outputCompaction.smartTruncate.maxLines, BOUNDS.maxLines.min, BOUNDS.maxLines.max),
-      },
-      truncate: {
-        enabled: pickBoolean(truncate.enabled, DEFAULT_CONFIG.outputCompaction.truncate.enabled),
-        maxChars: pickNumber(truncate.maxChars, DEFAULT_CONFIG.outputCompaction.truncate.maxChars, BOUNDS.maxChars.min, BOUNDS.maxChars.max),
-      },
-    },
+    mode: normalizeMode(root),
+    compact: pickBoolean(root.compact, pickBoolean(legacy.enabled, DEFAULT_CONFIG.compact)),
+    maxChars: pickNumber(rawMaxChars, DEFAULT_CONFIG.maxChars, BOUNDS.maxChars.min, BOUNDS.maxChars.max),
+    readCompaction: normalizeReadCompaction(root, legacy),
+    rtkExecutable: pickExecutable(root.rtkExecutable),
   }
 }

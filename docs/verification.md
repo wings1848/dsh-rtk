@@ -98,8 +98,9 @@
 | 压缩失败不影响工具调用 | 测试 | `never breaks a tool call when compaction throws`：content 非数组时按原样 accept |
 | 改写只作用于单次调用，随后恢复原参数 | 测试 | `rewrites a supported command and restores the original afterwards` 断言派发后 `exec.arguments.command === 'git status'` |
 | rtk 不可用时命令原样执行 | 测试 | `degrades to the original command when rtk cannot be resolved`（指向不存在的二进制） |
-| 配置数值被钳制在公布区间 | 测试 | `clamps truncation budgets to their published bounds`（maxChars 1000–200000、maxLines 40–4000） |
-| 关闭总开关后行为完全惰性 | 测试 | `does nothing at all when disabled` |
+| 配置数值被钳制在公布区间 | 测试 | `clamps the character budget to its published bounds`（maxChars 1000–200000） |
+| 旧 schema 的字段被迁移而非忽略 | 测试 | `migration from the previous schema` 三组用例：`enabled: false` → `mode: off`、`outputCompaction.enabled`/`truncate.maxChars` → `compact`/`maxChars`、三个 readCompaction 字段 → 单一 level（含 `budget` 映射） |
+| 关闭总开关后行为完全惰性 | 测试 | `does nothing at all when disabled`（`mode: off`） |
 
 ---
 
@@ -418,3 +419,30 @@ pwsh 真机执行、grep 超限时的真实会话 e2e、`/rtk` 命令面与 sett
 - **未做 0.2.0 真宿主的 11.6 式六轮 e2e**：依据是 0.2.0-rc.1 与 0.2.0-rc.2 的 `lib/types` 零差异、两轮130 项测试全绿，加上本机 0.2.0-rc.1 宿主上插件确实在改写命令。要补就照 11.6 的配方换 0.2.0 重跑。
 - 守卫测试只在「devDeps 也前移」时报警：如果只升级宿主而不动 devDeps，仍要人工记得加一行 peer 范围（这是 semver prerelease 规则的固有形状，无法前瞻未来 rc 系）。
 
+## 13. 配置收敛到 5 个字段（2026-10-19）
+
+日期：2026-10-19 · 触发：配置 26 项过重、Web 界面无法呈现；先经独立评审（P1–P5）再定稿。
+
+### 13.1 结论
+
+- schema 只剩 `mode`（off | rewrite | suggest）、`compact`、`maxChars`、`readCompaction`（none | budget | minimal | aggressive）、`rtkExecutable`；其余 21 个叶子字段固定为原默认值。
+- `readCompaction` 把旧「`enabled` + `sourceCodeFilteringEnabled` + `sourceCodeFiltering`」三字段合并为一个层级：关 → `none`；开启且过滤为 minimal/aggressive → 同层级；开启但未过滤 → `budget`。P2 指出的「删布尔会翻转行为」由迁移消除。
+- `enabled` 删除，`mode: off` 即主开关；旧 `enabled: false` 由 `normalizeConfig` 迁移。
+- `deferToHarnessSpill` 删除：spill 服务在不在即决策，无需开关。代价是旧 `deferToHarnessSpill: false` 的「spill 在场也保留自身上限」能力消失（已声明）。
+- `smartTruncate` 删除（默认关、仅 read、与字符预算重叠）；`truncate.enabled` 删除（预算恒生效）；`preserveExactSkillReads` 恒为真（skill 读取必须精确）。
+
+### 13.2 证据
+
+| 标准 | 命令 | 实测 |
+|---|---|---|
+| 类型检查 | `node --run typecheck` | 退出 0、无输出 |
+| 构建 + 全量测试 | `node --run build && node --test test/*.test.ts` | `tests 143 / pass 143 / fail 0` |
+| 旧字段迁移 | `test/config.test.ts` → `migration from the previous schema` | 3 组用例全过（enabled、compaction/truncate、readCompaction 三态） |
+| 报告渲染新字段 | `test/plugin-surface.test.ts` → `/rtk command` | 断言 `dsh-rtk: rewrite`、`compact: on`、`maxChars: 12000`、`readCompaction: none` |
+| 跨平台解析用例 | `resolves a real binary when one is on PATH` | 改用 `node` + `resolverNameFor(process.platform)`，Windows/Posix 均可过 |
+| 未知键不被 schema 拒绝 | 直接用 schemastery standard-schema 验证 | 旧字段作为 extra key 原样透传，由 `normalizeConfig` 迁移后丢弃，不报错 |
+
+### 13.3 已知取舍
+
+- 旧组合「enabled=true + filtering 关」映射为 `budget`（保字符上限、不碰源码）；旧 `smartTruncate` 用户的丢行行为不复存在。
+- 设置页条目由 26 个控件变为 5 个；字段一旦删除，用户层里残留的旧键不会报错，但也不会再生效。

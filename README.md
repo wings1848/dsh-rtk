@@ -29,7 +29,7 @@ model sees:  Branch: main
 - Every command with an rtk equivalent is rewritten before dispatch; commands rtk does not support run untouched.
 - **rtk stays the source of truth.** The plugin carries no rewrite table of its own — it asks the installed binary via `rtk rewrite`, so support tracks whatever rtk version is installed.
 - **`rewrite` and `suggest` modes.** `rewrite` replaces the command; `suggest` runs it unchanged and reports the equivalent it would have used.
-- **Runtime guard.** With `guardWhenRtkMissing` on (the default), a call that cannot prove rtk is available runs the original command. A missing optimizer never blocks work.
+- **Runtime guard.** A call that cannot prove rtk is available runs the original command. A missing optimizer never blocks work.
 - Rewritten commands get an isolated `RTK_DB_PATH`, so rtk's usage history does not land in the working tree.
 
 ### Output compaction
@@ -44,8 +44,7 @@ A multi-stage pipeline over `bash`, `read`, and `grep` results:
 | Git compaction | Summarizes `git status`, `git diff`, and `git log` |
 | Linter aggregation | Counts issues and ranks them by rule and file |
 | Search grouping | Groups `grep`-style matches by file |
-| Source filtering | `none`, `minimal`, or `aggressive` comment/whitespace removal (off by default) |
-| Smart truncation | Keeps signatures and imports when dropping lines (off by default) |
+| Read compaction | `readCompaction: minimal` drops ordinary comments; `aggressive` keeps only imports and signatures (off by default) |
 | Hard truncation | Final character budget |
 
 Two properties are load-bearing:
@@ -57,8 +56,7 @@ Two properties are load-bearing:
 
 When `dsh-spill-policy` is mounted, it writes a full result to disk and keeps a head/tail preview inline — that truncation is **recoverable**. This plugin's own hard truncation is not, and it runs first: at its 12 000-character default it fires far below spill's 50 000-byte threshold, so spill never sees a large result at all and the file that would have let a reader see the rest is never written.
 
-With `deferToHarnessSpill` on (the default) the plugin turns its own truncation off whenever the spill service is present, so a runaway command's output stays readable. Set it to `false` to keep the plugin's bound regardless.
-
+The plugin turns its own truncation off whenever the spill service is present, so a runaway command's output stays readable. Presence is the whole decision — there is no switch.
 
 ### Session metrics
 
@@ -92,7 +90,7 @@ Restart the host afterwards — profile rows mount at boot.
 > that profile. A bundle patch cannot express per-preset opt-in — a patch
 > appends rows to the root list, and the loader cannot extend
 > `preset-*.config.plugins`. Tame the row with its own switches instead:
-> `enabled: false`, or `mode: suggest` to only report the rewrites.
+> `mode: off`, or `mode: suggest` to only report the rewrites.
 
 ### Per-preset instead of global
 
@@ -121,7 +119,6 @@ replaces a row's config wholesale rather than merging into it:
 ```yaml
 - id: rtk
   config:
-    enabled: true
     mode: rewrite
     rtkExecutable: /opt/rtk/bin/rtk
 ```
@@ -140,41 +137,26 @@ Every field is optional; defaults are shown.
 - id: rtk
   name: '@wingsbutterfly/dsh-rtk'
   config:
-    enabled: true                    # master switch
-    mode: rewrite                    # rewrite | suggest
-    guardWhenRtkMissing: true        # run the original when rtk is unavailable
-    showRewriteNotifications: false  # append a one-line rewrite note to the result
+    mode: rewrite                    # off | rewrite | suggest
+    compact: true                    # compact tool output
+    maxChars: 12000                  # character budget (1000–200000)
+    readCompaction: none             # none | budget | minimal | aggressive
     rtkExecutable: rtk               # name or absolute path
-    rewriteTimeoutMs: 3000           # deadline for one `rtk rewrite` call
-    compactedTools: [bash, read, grep, ops_bash, ops_grep]
-    outputCompaction:
-      enabled: true
-      stripAnsi: true
-      readCompaction:
-        enabled: false               # lossy read compaction; off so code reads stay exact
-      sourceCodeFilteringEnabled: false
-      preserveExactSkillReads: false
-      sourceCodeFiltering: none      # none | minimal | aggressive
-      aggregateTestOutput: true
-      filterBuildOutput: true
-      compactGitOutput: true
-      aggregateLinterOutput: true
-      groupSearchOutput: true
-      trackSavings: true
-      deferToHarnessSpill: true      # let the harness spill policy own oversized output
-      smartTruncate:
-        enabled: false
-        maxLines: 220                # 40–4000
-      truncate:
-        enabled: true
-        maxChars: 12000              # 1000–200000
 ```
+
+> **Upgrading from the previous schema.** Retired fields are migrated rather
+> than ignored: `enabled: false` becomes `mode: off`, `outputCompaction.enabled`
+> becomes `compact`, `truncate.maxChars` becomes `maxChars`, and the three
+> read-compaction fields collapse into `readCompaction` (off → `none`, enabled
+> with `minimal`/`aggressive` → that level, enabled without filtering →
+> `budget`). Every other removed switch is fixed at its previous default; spill
+> deferral is detected from the mounted service instead of configured.
 
 The configuration is also editable live in the harness settings document, and takes effect without a restart. Where it appears depends on the harness generation: on dsh 0.1.7+ the row shows up as its own settings entry, named after the composition row's id (the example above: `rtk`), with every field editable; on dsh 0.1.5 it is the `dsh-rtk` namespace. Either way a composition `config:` block supplies the base layer and the settings document supplies the user layer on top — `/rtk path` reports which one this plugin can see. A settings service of an unknown generation costs the live editing only: the plugin degrades to composition-only configuration instead of failing to load.
 
 > **Where the row lives decides whether settings are writable (dsh 0.1.7+).** A row in the home patch (`~/.dsh/cordis.patch.yml`) is read-only there: the service refuses writes a lower layer would override, and `/rtk reset` reports that refusal honestly. Put the row in a profile composition to keep live editing.
 
-> **Why `readCompaction` is off by default.** Filtering or truncating a `read` result can leave the model editing against text that no longer matches the file. Everything on by default is lossless for the body text it summarizes, or only fires on outputs whose whole shape is being replaced.
+> **Why `readCompaction` defaults to `none`.** Filtering or truncating a `read` result can leave the model editing against text that no longer matches the file. Everything on by default is lossless for the body text it summarizes, or only fires on outputs whose whole shape is being replaced.
 
 ## Commands
 

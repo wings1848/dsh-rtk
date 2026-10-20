@@ -73,30 +73,12 @@ function yesNo(value: boolean): string {
 }
 
 function configReport(config: RtkConfig, status: RtkRuntimeStatus, location: string): string {
-  const compaction = config.outputCompaction
   const lines = [
-    `dsh-rtk: ${yesNo(config.enabled)}   mode: ${config.mode}`,
+    `dsh-rtk: ${config.mode}   compact: ${yesNo(config.compact)}   maxChars: ${config.maxChars}`,
+    `readCompaction: ${config.readCompaction}`,
+    `rtk executable: ${config.rtkExecutable}`,
     `rtk binary: ${status.rtkAvailable ? 'available' : 'unavailable'}${status.rtkExecutablePath ? ` (${status.rtkExecutablePath})` : ''}`,
     `config: ${location}`,
-    '',
-    'command rewriting',
-    `  guardWhenRtkMissing      ${yesNo(config.guardWhenRtkMissing)}`,
-    `  showRewriteNotifications ${yesNo(config.showRewriteNotifications)}`,
-    `  rewriteTimeoutMs         ${config.rewriteTimeoutMs}`,
-    '',
-    'output compaction',
-    `  enabled                  ${yesNo(compaction.enabled)}`,
-    `  tools                    ${config.compactedTools.join(', ')}`,
-    `  stripAnsi                ${yesNo(compaction.stripAnsi)}`,
-    `  readCompaction           ${yesNo(compaction.readCompaction.enabled)}`,
-    `  sourceCodeFiltering      ${compaction.sourceCodeFiltering}`,
-    `  filterBuildOutput        ${yesNo(compaction.filterBuildOutput)}`,
-    `  aggregateTestOutput      ${yesNo(compaction.aggregateTestOutput)}`,
-    `  compactGitOutput         ${yesNo(compaction.compactGitOutput)}`,
-    `  aggregateLinterOutput    ${yesNo(compaction.aggregateLinterOutput)}`,
-    `  groupSearchOutput        ${yesNo(compaction.groupSearchOutput)}`,
-    `  smartTruncate            ${yesNo(compaction.smartTruncate.enabled)} (max ${compaction.smartTruncate.maxLines} lines)`,
-    `  truncate                 ${yesNo(compaction.truncate.enabled)} (max ${compaction.truncate.maxChars} chars)`,
   ]
   if (status.lastError) lines.push('', `last rtk error: ${status.lastError}`)
   return lines.join('\n')

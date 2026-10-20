@@ -27,5 +27,4 @@
     - id: rtk
       name: '@wingsbutterfly/dsh-rtk'
       config:
-        enabled: true
         mode: rewrite

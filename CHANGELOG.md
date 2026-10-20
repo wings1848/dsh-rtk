@@ -14,8 +14,8 @@
   `dsh plugin --profile <name> add @wingsbutterfly/dsh-rtk` now installs **and**
   mounts the plugin. The bundle layer inserts the host-plane `rtk` row, the same
   row the manual `cordis.patch.yml` mount used to require.
-- dsh-ops support: `ops_bash` joins `REWRITABLE_TOOLS` and the default
-  `compactedTools` (`bash`, `read`, `grep`, `ops_bash`, `ops_grep`), so dsh-ops
+- dsh-ops support: `ops_bash` joins `REWRITABLE_TOOLS` and the compaction
+  pipeline (`bash`, `read`, `grep`, `ops_bash`, `ops_grep`), so dsh-ops
   sessions get both command rewriting and output compaction. `ops_grep` reuses
   the grep summarizer, with one guard: dsh-ops renders its Rust tools as a
   single `JSON.stringify` line, which the match-list heuristic would mis-read
@@ -34,6 +34,23 @@
 
 ### Changed
 
+- **Configuration reduced from 26 fields to 5**: `mode` (`off` | `rewrite` |
+  `suggest`), `compact`, `maxChars`, `readCompaction` (`none` | `budget` |
+  `minimal` | `aggressive`), and `rtkExecutable`. Retired fields are migrated by
+  `normalizeConfig` rather than ignored: `enabled: false` → `mode: off`,
+  `outputCompaction.enabled` → `compact`, `truncate.maxChars` → `maxChars`, and
+  the three read-compaction fields collapse into the single level. Every other
+  removed switch now sits at its previous default: `guardWhenRtkMissing`,
+  `notifyWhenRtkMissing`, `trackSavings`, `stripAnsi`, the five output
+  summarizers, `preserveExactSkillReads` and `truncate.enabled` stay on;
+  `showRewriteNotifications` stays off; `rewriteTimeoutMs` stays 3000;
+  `compactedTools` stays the five tools with a compactor. Spill deferral is
+  detected from the mounted `spillStore` service instead of configured.
+- `readCompaction` gained `budget`: bounds a `read` result by the character
+  budget without filtering source text — the behavior the old "enabled but not
+  filtering" combination produced.
+- `/rtk` now prints the five effective fields instead of the retired switch
+  tree.
 - **Scope decision revised (supersedes the 2026-10-11 entry).** A bundle patch
   can only append rows to the root entry list, and root rows are instantiated
   once per host process, so the mounted row's `tools/execute` /
@@ -44,7 +61,7 @@
   plugin-manager state. The bundle is now the default channel because
   one-command installation is worth more than preset granularity; per-preset
   use remains possible by skipping the bundle channel and adding the row to a
-  preset by hand (README, "Per-preset instead of global"). `enabled: false`
+  preset by hand (README, "Per-preset instead of global"). `mode: off`
   and `mode: suggest` stay the switches that tame the global row — including
   from a non-insert profile override (`- id: rtk` + full `config:`).
 

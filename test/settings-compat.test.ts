@@ -87,17 +87,17 @@ describe('legacy settings provider (dsh 0.1.5)', () => {
 
   it('registers the dsh-rtk namespace with the composition as its base', () => {
     const { provider, calls } = fakeProvider()
-    const bridge = createSettingsBridge(fakeContext({ settings: provider }).ctx, { enabled: true })
+    const bridge = createSettingsBridge(fakeContext({ settings: provider }).ctx, { mode: 'rewrite' })
     assert.deepEqual(calls.registered.map((entry) => entry.ns), ['dsh-rtk'])
-    assert.deepEqual(calls.registered[0]?.base, { enabled: true })
+    assert.deepEqual(calls.registered[0]?.base, { mode: 'rewrite' })
     assert.match(bridge.note, /`dsh-rtk` namespace/)
   })
 
   it('reads the provider value and reports a reset that replaces the user layer', async () => {
     const { provider, calls, set } = fakeProvider()
     const bridge = createSettingsBridge(fakeContext({ settings: provider }).ctx, {})
-    set({ enabled: false })
-    assert.equal(bridge.read().enabled, false)
+    set({ mode: 'off' })
+    assert.equal(bridge.read().mode, 'off')
     const message = await bridge.reset()
     assert.deepEqual(calls.replaced, [{}])
     assert.match(message, /user overrides cleared/)
@@ -143,11 +143,11 @@ describe('modern settings host (dsh 0.1.7)', () => {
 
   it('reads live values through the running references', () => {
     const { forms } = fakeForms()
-    const enabled = ref(true)
-    const bridge = createSettingsBridge(fakeContext({ settings: forms }).ctx, { enabled })
-    assert.equal(bridge.read().enabled, true)
-    ;(enabled as unknown as { [WRITE]: (next: unknown) => void })[WRITE](false)
-    assert.equal(bridge.read().enabled, false, 'the committed edit must be visible without a remount')
+    const mode = ref('rewrite')
+    const bridge = createSettingsBridge(fakeContext({ settings: forms }).ctx, { mode })
+    assert.equal(bridge.read().mode, 'rewrite')
+    ;(mode as unknown as { [WRITE]: (next: unknown) => void })[WRITE]('off')
+    assert.equal(bridge.read().mode, 'off', 'the committed edit must be visible without a remount')
   })
 
   it('refreshes on loader/volatile-update and resets its own entry', async () => {
@@ -201,7 +201,7 @@ describe('unknown settings generations', () => {
     for (const settings of [{}, { describe: 42 }, Object.create(null)]) {
       const harness = fakeContext({ settings })
       const bridge = createSettingsBridge(harness.ctx, { enabled: true })
-      assert.equal(bridge.read().enabled, true)
+      assert.equal(bridge.read().mode, 'rewrite')
       assert.match(bridge.note, /composition only/)
       assert.match(await bridge.reset(), /composition `config:` block/)
       let changes = 0
@@ -222,26 +222,24 @@ describe('unknown settings generations', () => {
     }
     const bridge = createSettingsBridge(fakeContext({ settings }).ctx, {})
     assert.match(bridge.note, /integration unavailable \(boom\)/)
-    assert.equal(bridge.read().enabled, true)
+    assert.equal(bridge.read().mode, 'rewrite')
   })
 })
 
 describe('Volatile values in normalizeConfig', () => {
   it('reads references at any depth, including one holding a subtree', () => {
     const config = normalizeConfig({
-      enabled: ref(false),
-      outputCompaction: ref({
-        truncate: { enabled: true, maxChars: ref(5000) },
-      }),
+      mode: ref('off'),
+      maxChars: ref(5000),
+      outputCompaction: ref({ truncate: { maxChars: ref(9000) } }),
     })
-    assert.equal(config.enabled, false)
-    assert.equal(config.outputCompaction.truncate.enabled, true)
-    assert.equal(config.outputCompaction.truncate.maxChars, 5000, 'nested references are read through too')
-    assert.equal(config.outputCompaction.stripAnsi, true, 'unlisted subtree fields fall back to defaults')
+    assert.equal(config.mode, 'off')
+    assert.equal(config.maxChars, 5000, 'top-level references are read through')
+    assert.equal(config.compact, true, 'retired subtree values fall back to defaults')
   })
 
   it('leaves plain values alone', () => {
-    const config = normalizeConfig({ rewriteTimeoutMs: 1234 })
-    assert.equal(config.rewriteTimeoutMs, 1234)
+    const config = normalizeConfig({ rtkExecutable: 'custom-rtk' })
+    assert.equal(config.rtkExecutable, 'custom-rtk')
   })
 })

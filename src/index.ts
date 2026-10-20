@@ -7,7 +7,7 @@ import type { PostToolDecision, ToolDispatchExecution, ToolExecution, ToolExecut
 import type { CommandRuntime } from '@deepseek-ai/dsh-commands'
 import type { SystemPrompt } from '@deepseek-ai/dsh-system-prompt'
 
-import { Config, type RtkConfig } from './config.js'
+import { Config, REWRITE_TIMEOUT_MS, type RtkConfig } from './config.js'
 import { createSettingsBridge } from './settings-compat.js'
 import { READ_COMPACTION_BANNER_PREFIX, compactToolResult } from './compact/index.js'
 import { parseBashResult, renderBashResult } from './compact/dsh-result.js'
@@ -75,14 +75,10 @@ const SOURCE_FILTER_TROUBLESHOOTING_NOTE =
 
 /** Whether lossy `read` compaction is enabled together with its safeguards. */
 function needsSourceFilterNote(config: RtkConfig): boolean {
-  const compaction = config.outputCompaction
   return (
-    config.enabled &&
-    compaction.enabled &&
-    compaction.readCompaction.enabled &&
-    compaction.sourceCodeFilteringEnabled &&
-    compaction.sourceCodeFiltering !== 'none' &&
-    (compaction.smartTruncate.enabled || compaction.truncate.enabled)
+    config.mode !== 'off' &&
+    config.compact &&
+    (config.readCompaction === 'minimal' || config.readCompaction === 'aggressive')
   )
 }
 
@@ -118,21 +114,8 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
    */
   const spillHandlesLargeOutput = ctx.get('spillStore') !== undefined
 
-  /**
-   * Apply the spill coordination to a freshly resolved configuration.
-   *
-   * Gated on an explicit switch rather than on "did the row set truncate?":
-   * the loader hands this function a schema-resolved config where every field
-   * already carries its default, so an absent key is indistinguishable from an
-   * explicit one. `deferToHarnessSpill: false` is how a row keeps its own
-   * bound regardless.
-   */
-  function coordinate(next: RtkConfig): RtkConfig {
-    if (spillHandlesLargeOutput && next.outputCompaction.deferToHarnessSpill) {
-      next.outputCompaction.truncate.enabled = false
-    }
-    return next
-  }
+  // Presence of the service is the whole decision; there is no switch, because
+  // a switch could only make the reader worse off (see the comment above).
 
   // The settings seam differs between harness generations (see
   // settings-compat.ts for the two shapes and why detection is by shape). The
@@ -140,7 +123,7 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
   // is `bridge.read()`, edits arrive through `bridge.onChange`, and an
   // unrecognized service costs the live-settings integration only.
   const bridge = createSettingsBridge(ctx, rawConfig)
-  let config = coordinate(bridge.read())
+  let config = bridge.read()
   let runtimeStatus: RtkRuntimeStatus = { rtkAvailable: false }
   const metrics = createMetricsTracker()
   /** Rewrite decisions awaiting their result, keyed by call id, for `suggest` mode. */
@@ -157,7 +140,7 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
   ctx.effect(
     () =>
       bridge.onChange(() => {
-        config = coordinate(bridge.read())
+        config = bridge.read()
         applySourceFilterNote()
       }),
     'dsh-rtk.settings-watch',
@@ -219,7 +202,6 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
   // ── command rewriting ────────────────────────────────────────────────────
 
   ctx.on('tools/execute', async (exec: ToolDispatchExecution, next: () => Promise<ToolExecutionResult>) => {
-    if (!config.enabled) return next()
     if (config.mode !== 'rewrite') return next()
     if (!REWRITABLE_TOOLS.has(exec.name)) return next()
 
@@ -230,17 +212,15 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
     if (shouldSkipRewrite(config, runtimeStatus)) {
       // The guard is standing the rewrite down because rtk is unavailable. Flag
       // this result so post-execute can say so once per session.
-      if (config.notifyWhenRtkMissing) {
-        if (missingRtkCalls.size > 256) missingRtkCalls.clear()
-        missingRtkCalls.add(exec.callId)
-      }
+      if (missingRtkCalls.size > 256) missingRtkCalls.clear()
+      missingRtkCalls.add(exec.callId)
       return next()
     }
 
     const decision = await resolveRtkRewrite(args.command, {
       runner: runExecutable,
       executable: runtimeStatus.rtkExecutableCommand ?? config.rtkExecutable,
-      timeoutMs: config.rewriteTimeoutMs,
+      timeoutMs: REWRITE_TIMEOUT_MS,
       signal: exec.signal,
     })
     if (!decision.changed) return next()
@@ -248,14 +228,6 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
     // `pwsh` is a rewrite target too, and PowerShell has no `export`.
     const shell: ShellKind = exec.name === 'pwsh' ? 'powershell' : 'posix'
     const command = applyRtkHistoryScope(decision.rewrittenCommand, rtkHistoryDbPath(), process.env.RTK_DB_PATH, shell)
-    if (config.showRewriteNotifications) {
-      // A cancelled call can be finalized on the `final-result` path, which
-      // bypasses post-execute and would leave its entry behind. The map is
-      // bounded so a notification nobody reads cannot grow without limit.
-      if (pendingSuggestions.size > 256) pendingSuggestions.clear()
-      pendingSuggestions.set(exec.callId, `[rtk] rewrote: ${decision.originalCommand} -> ${decision.rewrittenCommand}`)
-    }
-
     // `arguments` is declared readonly, but the around-dispatch stage is the
     // one place the registry re-reads it before invoking the body. Restoring it
     // in `finally` keeps every later stage — post-execute, content
@@ -276,7 +248,7 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
   // ── suggest mode ─────────────────────────────────────────────────────────
 
   ctx.on('tools/execute', async (exec: ToolDispatchExecution, next: () => Promise<ToolExecutionResult>) => {
-    if (!config.enabled || config.mode !== 'suggest') return next()
+    if (config.mode !== 'suggest') return next()
     if (!REWRITABLE_TOOLS.has(exec.name)) return next()
 
     const args = asRecord(exec.arguments)
@@ -286,17 +258,15 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
     if (shouldSkipRewrite(config, runtimeStatus)) {
       // The guard is standing the rewrite down because rtk is unavailable. Flag
       // this result so post-execute can say so once per session.
-      if (config.notifyWhenRtkMissing) {
-        if (missingRtkCalls.size > 256) missingRtkCalls.clear()
-        missingRtkCalls.add(exec.callId)
-      }
+      if (missingRtkCalls.size > 256) missingRtkCalls.clear()
+      missingRtkCalls.add(exec.callId)
       return next()
     }
 
     const decision = await resolveRtkRewrite(args.command, {
       runner: runExecutable,
       executable: runtimeStatus.rtkExecutableCommand ?? config.rtkExecutable,
-      timeoutMs: config.rewriteTimeoutMs,
+      timeoutMs: REWRITE_TIMEOUT_MS,
       signal: exec.signal,
     })
     if (decision.changed) {
@@ -318,7 +288,7 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
     let notice = pendingSuggestions.get(exec.callId)
     pendingSuggestions.delete(exec.callId)
 
-    if (missingRtkCalls.delete(exec.callId) && config.notifyWhenRtkMissing) {
+    if (missingRtkCalls.delete(exec.callId)) {
       const agentKey = exec.agent?.id
       if (agentKey !== undefined && !notifiedAgents.has(agentKey)) {
         if (notifiedAgents.size > 256) notifiedAgents.clear()
@@ -328,17 +298,19 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
     }
 
     if (decision.kind !== 'accept') return decision
-    if (!config.enabled) return decision
+    if (config.mode === 'off') return decision
 
     const source: readonly ContentBlock[] = decision.content ?? result.content
     if (source.length === 0) return decision
 
     let content: readonly ContentBlock[] = source
     try {
-      const outcome = compactToolResult({ toolName: exec.name, args: exec.arguments, content: source }, config)
+      const outcome = compactToolResult({ toolName: exec.name, args: exec.arguments, content: source }, config, {
+        deferToHarnessSpill: spillHandlesLargeOutput,
+      })
       if (outcome.changed && outcome.content !== undefined) {
         content = outcome.content as ContentBlock[]
-        if (outcome.metadata !== undefined && config.outputCompaction.trackSavings) {
+        if (outcome.metadata !== undefined) {
           metrics.track(
             source.map((block) => (block as { text?: string }).text ?? '').join('\n'),
             content.map((block) => (block as { text?: string }).text ?? '').join('\n'),
@@ -376,7 +348,7 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
       getConfig: () => config,
       resetConfig: async () => {
         const message = await bridge.reset()
-        config = coordinate(bridge.read())
+        config = bridge.read()
         return message
       },
       getRuntimeStatus: () => runtimeStatus,
