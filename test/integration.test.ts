@@ -109,8 +109,45 @@ describe('apply() wiring', () => {
 
     assert.equal(result.isError, false)
     assert.match(String(seenByBody), /\brtk git status$/, 'the body must see the rewritten command')
-    assert.match(String(seenByBody), /RTK_DB_PATH=/, 'the rewritten command must scope the rtk history database')
+    // The default is to inject nothing: rtk's own database is the one the
+    // user's terminal `rtk gain` reads, and /tmp is tmpfs on most Linux hosts.
+    assert.doesNotMatch(
+      String(seenByBody),
+      /RTK_DB_PATH=/,
+      'the default must not scope the ledger away from rtk’s own database',
+    )
     assert.equal((exec.arguments as { command: string }).command, 'git status', 'the original arguments must be restored')
+  })
+
+  it('scopes the ledger when a path is configured', { skip: rtkSkip }, async () => {
+    const harness = fakeContext()
+    apply(harness.ctx, normalizeConfig({ historyDbPath: '/var/lib/dsh-rtk/history.db' }) as never)
+
+    const exec = bashExecution('git status')
+    let seenByBody: unknown
+    await harness.emit('tools/execute', exec, async () => {
+      seenByBody = (exec.arguments as { command: string }).command
+      return { isError: false, value: 'ok', content: [] }
+    })
+
+    assert.match(String(seenByBody), /export RTK_DB_PATH='\/var\/lib\/dsh-rtk\/history\.db'/)
+    assert.match(String(seenByBody), /\brtk git status$/)
+  })
+
+  it('leaves the command unscoped when the configured path is unusable', { skip: rtkSkip }, async () => {
+    const harness = fakeContext()
+    apply(harness.ctx, normalizeConfig({ historyDbPath: 'relative/ledger.db' }) as never)
+
+    const exec = bashExecution('git status')
+    let seenByBody: unknown
+    await harness.emit('tools/execute', exec, async () => {
+      seenByBody = (exec.arguments as { command: string }).command
+      return { isError: false, value: 'ok', content: [] }
+    })
+
+    // A bad path costs the scoping only; the rewrite itself must still happen.
+    assert.doesNotMatch(String(seenByBody), /RTK_DB_PATH=/)
+    assert.match(String(seenByBody), /\brtk git status$/)
   })
 
   it('leaves an unsupported command untouched', async () => {

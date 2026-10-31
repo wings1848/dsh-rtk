@@ -1,4 +1,5 @@
 import type { RtkConfig } from './config.js'
+import type { HistoryDbResolution } from './history-db.js'
 import type { MetricsSummary } from './metrics.js'
 import type { RtkRuntimeStatus } from './runtime-guard.js'
 
@@ -19,6 +20,13 @@ export interface RtkCommandController {
   clearMetrics(): void
   /** Where the user layer of the configuration lives, when it is persisted. */
   configLocation(): string
+  /**
+   * Where rewritten commands send rtk's usage ledger.
+   *
+   * Optional so a controller in a test (or an older row) need not implement it:
+   * the report then simply omits the line.
+   */
+  getHistoryDbResolution?(): { resolution: HistoryDbResolution; warning?: string }
 }
 
 /** The command result shape the harness normalizes. */
@@ -58,7 +66,12 @@ function yesNo(value: boolean): string {
   return value ? 'on' : 'off'
 }
 
-function configReport(config: RtkConfig, status: RtkRuntimeStatus, location: string): string {
+function configReport(
+  config: RtkConfig,
+  status: RtkRuntimeStatus,
+  location: string,
+  historyDb: { resolution: HistoryDbResolution; warning?: string } | undefined,
+): string {
   const compaction = config.outputCompaction
   const lines = [
     `dsh-rtk: ${yesNo(config.enabled)}   mode: ${config.mode}`,
@@ -69,6 +82,7 @@ function configReport(config: RtkConfig, status: RtkRuntimeStatus, location: str
     `  guardWhenRtkMissing      ${yesNo(config.guardWhenRtkMissing)}`,
     `  showRewriteNotifications ${yesNo(config.showRewriteNotifications)}`,
     `  rewriteTimeoutMs         ${config.rewriteTimeoutMs}`,
+    `  history database         ${describeHistoryDb(historyDb)}`,
     '',
     'output compaction',
     `  enabled                  ${yesNo(compaction.enabled)}`,
@@ -86,6 +100,22 @@ function configReport(config: RtkConfig, status: RtkRuntimeStatus, location: str
   ]
   if (status.lastError) lines.push('', `last rtk error: ${status.lastError}`)
   return lines.join('\n')
+}
+
+/**
+ * One line describing where the usage ledger goes.
+ *
+ * The default case matters more than it looks: users who see the agent working
+ * but `rtk gain` empty need to be told, from inside the tool, which database
+ * each side writes to.
+ */
+function describeHistoryDb(historyDb: { resolution: HistoryDbResolution; warning?: string } | undefined): string {
+  if (historyDb === undefined) return 'rtk default'
+  const { resolution, warning } = historyDb
+  const note = warning ?? resolution.warning
+  if (note !== undefined) return `rtk default (configured value refused: ${note})`
+  if (resolution.path === undefined) return 'rtk default (shared with `rtk gain`)'
+  return resolution.path
 }
 
 function statsReport(summary: MetricsSummary): string {
@@ -140,7 +170,15 @@ export function createRtkCommand(controller: RtkCommandController): {
       switch (subcommand) {
         case '':
         case 'show':
-          return { kind: 'success', text: configReport(controller.getConfig(), controller.getRuntimeStatus(), controller.configLocation()) }
+          return {
+            kind: 'success',
+            text: configReport(
+              controller.getConfig(),
+              controller.getRuntimeStatus(),
+              controller.configLocation(),
+              controller.getHistoryDbResolution?.(),
+            ),
+          }
 
         case 'path':
           return { kind: 'success', text: controller.configLocation() }

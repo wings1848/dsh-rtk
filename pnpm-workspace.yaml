@@ -13,3 +13,11 @@
 # everything else in the tree stays subject to the age check.
 minimumReleaseAgeExclude:
   - '@deepseek-ai/*'
+
+# GHSA-mrhx-c7xc-m3w5: zod <4.6.6 can exhaust memory validating oversized
+# constrained collections. zod arrives only transitively, through the harness
+# packages this plugin builds against, at a version their own `^4.4.3` range
+# already permits — so an override pins the patched release without asking the
+# harness to re-release. Drop this once the harness ships a patched floor.
+overrides:
+  zod@<4.6.6: ^4.6.7

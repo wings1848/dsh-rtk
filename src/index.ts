@@ -1,6 +1,3 @@
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-
 import type { Context } from '@deepseek-ai/cordis'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { PostToolDecision, ToolDispatchExecution, ToolExecution, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
@@ -9,6 +6,7 @@ import type { SystemPrompt } from '@deepseek-ai/dsh-system-prompt'
 
 import { Config, type RtkConfig } from './config.js'
 import { createSettingsBridge } from './settings-compat.js'
+import { resolveHistoryDbPath } from './history-db.js'
 import { READ_COMPACTION_BANNER_PREFIX, compactToolResult } from './compact/index.js'
 import { parseBashResult, renderBashResult } from './compact/dsh-result.js'
 import { createMetricsTracker } from './metrics.js'
@@ -45,11 +43,6 @@ export { Config }
 
 /** Tools whose `command` argument can be rewritten. */
 const REWRITABLE_TOOLS = new Set(['bash', 'pwsh'])
-
-/** Path of the rtk history database this plugin scopes rewritten commands to. */
-function rtkHistoryDbPath(): string {
-  return join(tmpdir(), 'dsh-rtk', 'history.db')
-}
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : undefined
@@ -242,7 +235,13 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
 
     // `pwsh` is a rewrite target too, and PowerShell has no `export`.
     const shell: ShellKind = exec.name === 'pwsh' ? 'powershell' : 'posix'
-    const command = applyRtkHistoryScope(decision.rewrittenCommand, rtkHistoryDbPath(), process.env.RTK_DB_PATH, shell)
+    // Resolved per call, not cached: the setting is live-editable, and the
+    // resolution is cheap (string work, no I/O). A refused value costs the
+    // scoping only — `/rtk show` reports the refusal from the same call.
+    const historyScope = resolveHistoryDbPath(config.historyDbPath)
+    const command = historyScope.path === undefined
+      ? decision.rewrittenCommand
+      : applyRtkHistoryScope(decision.rewrittenCommand, historyScope.path, process.env.RTK_DB_PATH, shell)
     if (config.showRewriteNotifications) {
       // A cancelled call can be finalized on the `final-result` path, which
       // bypasses post-execute and would leave its entry behind. The map is
@@ -379,6 +378,7 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
       getMetrics: () => metrics.summary(),
       clearMetrics: () => metrics.clear(),
       configLocation: () => bridge.note,
+      getHistoryDbResolution: () => ({ resolution: resolveHistoryDbPath(config.historyDbPath) }),
     })
     ctx.effect(() => commands.register(command), 'dsh-rtk.command')
   }

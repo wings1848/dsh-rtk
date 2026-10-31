@@ -110,7 +110,8 @@ describe('metrics tracker', () => {
 describe('/rtk command', () => {
   const tracker = createMetricsTracker()
   const config = normalizeConfig({})
-  const command = createRtkCommand({
+  /** The controller every reporting case shares, minus the ledger accessor. */
+  const baseController = () => ({
     getConfig: () => config,
     resetConfig: async () => "dsh-rtk: user overrides cleared — configuration is back to the composition's values.",
     getRuntimeStatus: () => ({ rtkAvailable: true, rtkExecutablePath: '/usr/bin/rtk' }),
@@ -119,6 +120,7 @@ describe('/rtk command', () => {
     clearMetrics: () => tracker.clear(),
     configLocation: () => 'the `dsh-rtk` namespace',
   })
+  const command = createRtkCommand(baseController())
 
   it('is registered under the name rtk', () => {
     assert.equal(command.name, 'rtk')
@@ -131,7 +133,33 @@ describe('/rtk command', () => {
       assert.match(String(result.text), /dsh-rtk: on/)
       assert.match(String(result.text), /mode: rewrite/)
       assert.match(String(result.text), /rtk binary: available/)
+      assert.match(String(result.text), /history database/, 'the report must say where the usage ledger goes')
     }
+  })
+
+  it('names the resolved ledger, or says rtk decides', async () => {
+    const withDefault = createRtkCommand({ ...baseController(), getHistoryDbResolution: () => ({ resolution: {} }) })
+    assert.match(String((await withDefault.handler({ rawInput: 'show' })).text), /history database\s+rtk default/)
+
+    const withPath = createRtkCommand({
+      ...baseController(),
+      getHistoryDbResolution: () => ({ resolution: { path: '/var/lib/dsh-rtk/history.db' } }),
+    })
+    assert.match(String((await withPath.handler({ rawInput: 'show' })).text), /\/var\/lib\/dsh-rtk\/history\.db/)
+
+    // A refused value must be visible here. A command that silently runs
+    // unscoped is the one failure the user cannot see from the outside.
+    const withRefusal = createRtkCommand({
+      ...baseController(),
+      getHistoryDbResolution: () => ({ resolution: { warning: 'is not an absolute path' } }),
+    })
+    assert.match(String((await withRefusal.handler({ rawInput: 'show' })).text), /refused: .*not an absolute path/)
+  })
+
+  it('still reports a ledger line when the controller has no accessor', async () => {
+    const result = await createRtkCommand(baseController()).handler({ rawInput: 'show' })
+    assert.equal(result.kind, 'success')
+    assert.match(String(result.text), /history database\s+rtk default/)
   })
 
   it('reports the verification outcome', async () => {

@@ -6,3 +6,6 @@ lib/
 # Local SVG render scratch
 .chromium-tmp/
 **/.preview.png
+
+# devflow run artifacts (local process records)
+runs/

@@ -30,7 +30,7 @@ model sees:  Branch: main
 - **rtk stays the source of truth.** The plugin carries no rewrite table of its own — it asks the installed binary via `rtk rewrite`, so support tracks whatever rtk version is installed.
 - **`rewrite` and `suggest` modes.** `rewrite` replaces the command; `suggest` runs it unchanged and reports the equivalent it would have used.
 - **Runtime guard.** With `guardWhenRtkMissing` on (the default), a call that cannot prove rtk is available runs the original command. A missing optimizer never blocks work.
-- Rewritten commands get an isolated `RTK_DB_PATH`, so rtk's usage history does not land in the working tree.
+- Rewritten commands never write rtk's usage history into the working tree: by default they inherit rtk's own user-level database, and `historyDbPath` can pin an exact location.
 
 ### Output compaction
 
@@ -68,6 +68,36 @@ With `deferToHarnessSpill` on (the default) the plugin turns its own truncation 
 
 **Supported harness:** dsh 0.1.5, 0.1.7 and 0.2.0 — each verified, evidence in
 [`docs/verification.md`](docs/verification.md). Node >= 22.18.
+
+### 0. Prerequisite: install the rtk binary
+
+**`dsh-rtk` is a plugin around rtk, not a replacement for it.** Without the `rtk`
+executable on `PATH` there is nothing to rewrite commands to and nothing to
+compact with, so the plugin stands down: commands run unchanged, output is not
+compacted, and nothing appears to happen. That is the one failure you cannot see
+from the outside — a session gets a single line about it
+(`[rtk] rtk not found; rewriting is off`), easy to miss inside a tool result.
+
+Install it first:
+
+```bash
+brew install rtk                        # macOS / Linux (Homebrew, recommended)
+winget install rtk-ai.rtk               # Windows
+curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh
+cargo install --git https://github.com/rtk-ai/rtk
+```
+
+> **Do not run plain `cargo install rtk`.** crates.io carries an unrelated crate
+> of that name; only the `--git` form above installs this tool.
+
+Verify before going further — this must print a version:
+
+```bash
+rtk --version
+```
+
+`/rtk verify` reports the same thing from inside a session, and prints these
+install options when it fails.
 
 ### 1. Install the package
 
@@ -121,6 +151,7 @@ Every field is optional; defaults are shown.
     guardWhenRtkMissing: true        # run the original when rtk is unavailable
     showRewriteNotifications: false  # append a one-line rewrite note to the result
     rtkExecutable: rtk               # name or absolute path
+    historyDbPath: ''                # '' = rtk's own database; or an absolute/~ path, or `isolated`
     rewriteTimeoutMs: 3000           # deadline for one `rtk rewrite` call
     compactedTools: [bash, read, grep]
     outputCompaction:
@@ -151,6 +182,17 @@ The configuration is also editable live in the harness settings document, and ta
 > **Where the row lives decides whether settings are writable (dsh 0.1.7+).** A row in the home patch (`~/.dsh/cordis.patch.yml`) is read-only there: the service refuses writes a lower layer would override, and `/rtk reset` reports that refusal honestly. Put the row in a profile composition to keep live editing.
 
 > **Why `readCompaction` is off by default.** Filtering or truncating a `read` result can leave the model editing against text that no longer matches the file. Everything on by default is lossless for the body text it summarizes, or only fires on outputs whose whole shape is being replaced.
+
+> **Where rtk keeps its usage ledger, and why the default is "don't touch it".** Rewritten commands run under `RTK_DB_PATH` only when `historyDbPath` names a location. The empty default injects nothing, so rtk writes to its own per-platform database (`~/.local/share/rtk/history.db` on Linux, honouring `XDG_DATA_HOME`) — the same one your terminal's `rtk gain` reads, and one that survives a reboot. Accepted values:
+>
+> | `historyDbPath` | Effect |
+> |---|---|
+> | `''` (default) or `default` | Inject nothing; rtk decides |
+> | `/var/lib/dsh-rtk/history.db` | That absolute path, verbatim |
+> | `~/.local/share/rtk/history.db` | Leading `~` expanded to your home directory |
+> | `isolated` | `<tmpdir>/dsh-rtk/history.db` — the pre-0.1.3 behavior: kept out of your home, but cleared on reboot and invisible to `rtk gain` |
+>
+> A relative path is refused rather than resolved against the current directory (that would drop the ledger into whatever project is running). A refusal costs the scoping only — the command still runs rewritten — and `/rtk show` reports it on its `history database` line. An `RTK_DB_PATH` already in your environment always wins.
 
 ## Commands
 

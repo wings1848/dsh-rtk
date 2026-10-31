@@ -61,6 +61,15 @@ export interface RtkConfig {
   notifyWhenRtkMissing: boolean
   /** Executable used for both `--version` probes and `rtk rewrite`. */
   rtkExecutable: string
+  /**
+   * Where rewritten commands send rtk's usage ledger.
+   *
+   * `''` (the default) injects nothing, so rtk uses its own per-platform
+   * database and the user's terminal `rtk gain` sees the agent's rows. Accepts
+   * an absolute path, a `~/` path, or `isolated` for the pre-0.1.3 tmpdir
+   * location. See `resolveHistoryDbPath`.
+   */
+  historyDbPath: string
   /** Deadline for one `rtk rewrite` call. */
   rewriteTimeoutMs: number
   /** Tools whose results pass through the compaction pipeline. */
@@ -83,6 +92,11 @@ export const DEFAULT_CONFIG: RtkConfig = {
   // bounded even though it is on by default.
   notifyWhenRtkMissing: true,
   rtkExecutable: 'rtk',
+  // Empty: inject nothing and let rtk use its own ledger. rtk already knows the
+  // right per-platform location, and that is the database the user's terminal
+  // `rtk gain` reads — a plugin-chosen tmpdir path disagreed with it, and
+  // `/tmp` being tmpfs emptied the ledger on every reboot.
+  historyDbPath: '',
   rewriteTimeoutMs: 3000,
   compactedTools: ['bash', 'read', 'grep'],
   outputCompaction: {
@@ -176,6 +190,14 @@ export const Config = z.object({
       .description('Tell each session once that command rewriting is off because rtk is not installed.'),
   ),
   rtkExecutable: editable(z.string().default(DEFAULT_CONFIG.rtkExecutable).description('Executable name or path for rtk.')),
+  historyDbPath: editable(
+    z
+      .string()
+      .default(DEFAULT_CONFIG.historyDbPath)
+      .description(
+        "Where rewritten commands point rtk's usage ledger. Empty follows rtk's own database (shared with the terminal `rtk gain`); also accepts an absolute path, a `~/` path, or `isolated` for a per-boot tmpdir.",
+      ),
+  ),
   rewriteTimeoutMs: editable(z.natural().default(DEFAULT_CONFIG.rewriteTimeoutMs).description('Deadline in milliseconds for one `rtk rewrite` call.')),
   compactedTools: editable(
     z
@@ -260,6 +282,17 @@ function pickString(value: unknown, fallback: string): string {
   return typeof value === 'string' && value.trim() ? value : fallback
 }
 
+/**
+ * Pick a string where the empty value is meaningful, not a missing one.
+ *
+ * `historyDbPath` uses `''` to mean "follow rtk's own database", so falling back
+ * on an empty string would make an explicit `''` indistinguishable from an
+ * absent key — and the two agree only by accident.
+ */
+function pickOptionalString(value: unknown, fallback: string): string {
+  return typeof value === 'string' ? value : fallback
+}
+
 function pickStringList(value: unknown, fallback: readonly string[]): string[] {
   if (!Array.isArray(value)) return [...fallback]
   const names = value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
@@ -296,6 +329,7 @@ export function normalizeConfig(raw: unknown): RtkConfig {
     showRewriteNotifications: pickBoolean(root.showRewriteNotifications, DEFAULT_CONFIG.showRewriteNotifications),
     notifyWhenRtkMissing: pickBoolean(root.notifyWhenRtkMissing, DEFAULT_CONFIG.notifyWhenRtkMissing),
     rtkExecutable: pickString(root.rtkExecutable, DEFAULT_CONFIG.rtkExecutable),
+    historyDbPath: pickOptionalString(root.historyDbPath, DEFAULT_CONFIG.historyDbPath),
     rewriteTimeoutMs: pickNumber(root.rewriteTimeoutMs, DEFAULT_CONFIG.rewriteTimeoutMs, 100, 60000),
     compactedTools: pickStringList(root.compactedTools, DEFAULT_CONFIG.compactedTools),
     outputCompaction: {
