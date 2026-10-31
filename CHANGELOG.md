@@ -18,6 +18,23 @@
   ledger into whichever project is running); a refusal costs the scoping only —
   the command still runs rewritten — and `/rtk show` reports it on its new
   `history database` line. An `RTK_DB_PATH` already in the environment still wins.
+- **Three more `historyDbPath` values are refused, because rtk fails on them
+  silently.** A directory (`~`, `~/`, `/var/lib/rtk/`) is not a database file:
+  rtk exits 0, writes nowhere, and only `rtk gain` later reports "unable to open
+  database file" — the whole ledger disappears with no visible failure. Another
+  platform's path syntax is accepted by rtk but resolves *relatively*:
+  `C:\data\history.db` becomes a file in the working directory on Linux, which is
+  the leak the scoping exists to prevent. Both are now refused with a warning
+  that names the risk and shows a usable value, and platform detection uses
+  `node:path`'s own `win32` / `posix` rules instead of an approximation.
+- **`/rtk show` now reports the ledger actually in effect, not the configured
+  value.** When an ambient `RTK_DB_PATH` is set the plugin injects nothing, so
+  printing the setting pointed readers at a database nobody writes — the exact
+  confusion that line was added to remove. It now names the ambient path and
+  says the setting is ignored.
+- The ledger-scoping integration test no longer depends on the developer's shell:
+  a machine with `RTK_DB_PATH` exported used to see one failure locally while CI
+  (clean) stayed green.
 
 ### Docs
 

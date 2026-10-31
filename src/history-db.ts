@@ -1,5 +1,5 @@
 import { homedir, tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, posix, win32 } from 'node:path'
 
 /**
  * Where rtk writes its usage ledger.
@@ -44,6 +44,15 @@ export interface HistoryDbEnvironment {
    */
   home?: string | undefined
   tmpdir?: string
+  /**
+   * Platform whose path syntax the value must obey.
+   *
+   * Not a detail: `C:\data\history.db` looks absolute to a naive check but is
+   * an ordinary *relative* filename on Linux, and rtk would create it in the
+   * working directory — the exact leak the scoping exists to prevent. So the
+   * dialect is matched, not merely sniffed.
+   */
+  platform?: NodeJS.Platform
 }
 
 /**
@@ -55,18 +64,24 @@ export interface HistoryDbEnvironment {
  * |---|---|
  * | `''` / `default` | nothing injected; rtk uses its own default |
  * | `isolated` | `<tmpdir>/dsh-rtk/history.db` — the pre-0.1.3 behavior |
- * | absolute path | used verbatim |
+ * | absolute path (of this platform) | used verbatim |
  * | `~/...` | `~` expanded to the home directory |
  *
- * A relative path is refused rather than resolved: resolving it against the
- * process cwd would drop the ledger into whichever project happens to be
- * running, which is exactly the leak the isolation existed to prevent. A
- * refusal is reported as a warning and leaves the command unscoped — it is
- * never a reason to fail a tool call.
+ * Two refusals are deliberate and worth the words:
+ *
+ * - A **relative** path is never resolved. Resolving it against the process cwd
+ *   would drop the ledger into whichever project happens to be running.
+ * - A **directory** (`~`, `~/`, `/`, `~/.local/share/rtk`) is refused. rtk
+ *   treats `RTK_DB_PATH` as a database *file*: handed a directory it exits 0
+ *   and writes nowhere, then `rtk gain` reports "unable to open database file".
+ *   The ledger is lost with no visible failure, which is worse than a warning.
+ *
+ * Both refusals are reported as a warning and leave the command unscoped — they
+ * are never a reason to fail a tool call.
  *
  * @param configured - the raw `historyDbPath` setting.
- * @param environment - home and temp directories, defaulted from the process.
- * @returns the path to inject, if any, and any warning explaining a refusal.
+ * @param environment - home, temp directory, and platform; defaulted from the process.
+ * @returns the path to inject, if any, and the warning explaining a refusal.
  */
 export function resolveHistoryDbPath(
   configured: string | undefined,
@@ -76,6 +91,7 @@ export function resolveHistoryDbPath(
   if (raw === '' || DEFAULT_SENTINELS.has(raw.toLowerCase())) return {}
 
   const temporary = environment.tmpdir ?? tmpdir()
+  const platform = environment.platform ?? process.platform
 
   if (raw.toLowerCase() === ISOLATED_HISTORY_DB_PATH) {
     return { path: join(temporary, 'dsh-rtk', 'history.db') }
@@ -91,7 +107,11 @@ export function resolveHistoryDbPath(
       }
     }
     const rest = raw.slice(1).replace(/^[/\\]/, '')
-    return { path: rest === '' ? home : join(home, rest) }
+    // A bare `~` or `~/` resolves to the home directory itself, not a file.
+    if (rest === '') {
+      return refuseAsDirectory(raw, join(home, 'history.db'))
+    }
+    return refuseTrailingSeparator(join(home, rest), raw, platform)
   }
 
   if (raw.startsWith('~')) {
@@ -102,18 +122,56 @@ export function resolveHistoryDbPath(
     }
   }
 
-  // Windows drive paths (`C:\...`) and POSIX absolute paths both reach here.
-  if (!isAbsolutePath(raw)) {
+  if (!isAbsoluteForPlatform(raw, platform)) {
+    // Windows-style paths are called out separately on POSIX, because "not
+    // absolute" undersells the risk: this one would be *accepted by rtk* and
+    // written into the working directory as a file literally named `C:\...`.
+    const foreign = platform !== 'win32' && (WINDOWS_DRIVE.test(raw) || raw.startsWith('\\\\'))
     return {
-      warning: `historyDbPath "${raw}" is not an absolute path; use an absolute path, a "~/" path, "isolated", or leave it empty to follow rtk's own database`,
+      warning: foreign
+        ? `historyDbPath "${raw}" is a Windows path, which is a relative filename on ${platform} — rtk would write the ledger into the working directory. Use an absolute ${platform} path.`
+        : `historyDbPath "${raw}" is not an absolute path; use an absolute path, a "~/..." path, "isolated", or leave it empty to follow rtk's own database`,
     }
   }
 
-  return { path: raw }
+  return refuseTrailingSeparator(raw, raw, platform)
 }
 
-/** Whether a path is absolute on the platform that produced it. */
-function isAbsolutePath(value: string): boolean {
-  if (value.startsWith('/')) return true
-  return /^[A-Za-z]:[/\\]/.test(value) || value.startsWith('\\\\')
+/** `C:` drive prefix, which is only absolute on Windows. */
+const WINDOWS_DRIVE = /^[A-Za-z]:/
+
+/** Refuse a value that names a directory, suggesting the database file inside it. */
+function refuseAsDirectory(raw: string, suggestion: string): HistoryDbResolution {
+  return {
+    warning: `historyDbPath "${raw}" is a directory, but rtk needs a database file. Use e.g. "${suggestion}".`,
+  }
+}
+
+/**
+ * Whether a path is absolute under a given platform's rules.
+ *
+ * Delegated to `node:path`'s per-platform implementations rather than a regex,
+ * because the rules have corners worth not re-deriving: on Windows a leading
+ * `/` *is* absolute (rooted on the current drive) and `C:x` is *not* (drive
+ * relative), while on POSIX both are ordinary relative names.
+ */
+function isAbsoluteForPlatform(value: string, platform: NodeJS.Platform): boolean {
+  return platform === 'win32' ? win32.isAbsolute(value) : posix.isAbsolute(value)
+}
+
+/**
+ * Reject a path that names a directory rather than a database file.
+ *
+ * A trailing separator is the reliable signal a user meant a directory, and the
+ * one case worth catching by inspection: rtk handed a directory exits 0, writes
+ * nowhere, and only fails later in `rtk gain` — the ledger silently vanishes.
+ * A path that merely *looks* like one (`.../rtk`) is not second-guessed, because
+ * creating that file is valid and stat-ing the filesystem on every rewritten
+ * command would put I/O on the hot path to answer a question we cannot answer
+ * for a path that does not exist yet.
+ */
+function refuseTrailingSeparator(path: string, raw: string, platform: NodeJS.Platform): HistoryDbResolution {
+  const separator = platform === 'win32' ? /[/\\]$/ : /\/$/
+  if (separator.test(raw)) return refuseAsDirectory(raw, `${path.replace(/[/\\]$/, '')}/history.db`)
+  return { path }
 }

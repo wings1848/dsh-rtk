@@ -440,12 +440,12 @@ pwsh 真机执行、grep 超限时的真实会话 e2e、`/rtk` 命令面与 sett
 |---|---|---|---|---|
 | A1 | 默认不注入 `RTK_DB_PATH` | `env -u RTK_DB_PATH node --test test/integration.test.ts` | 「默认不 scope 台账」用例通过 | ✅ |
 | A2 | 新增 `historyDbPath`，默认空串 | `env -u RTK_DB_PATH node -e "import('./lib/config.js').then(m=>console.log(JSON.stringify(m.normalizeConfig({}).historyDbPath)))"` | `""` | ✅ |
-| A3 | `isolated` 回退 tmpdir，`~/` 展开为绝对路径 | `env -u RTK_DB_PATH node --test test/history-db.test.ts` | 14/14 通过 | ✅ |
+| A3 | `isolated` 回退 tmpdir，`~/` 展开为绝对路径 | `env -u RTK_DB_PATH node --test test/history-db.test.ts` | 12/12 通过 | ✅ |
 | A4 | 相对路径被拒绝并给 warning | 同上 | warning 含 `absolute` | ✅ |
 | A5 | 显式路径真正注入命令 | `env -u RTK_DB_PATH node --test test/integration.test.ts` | 命令含 `export RTK_DB_PATH='/var/lib/dsh-rtk/history.db'` | ✅ |
 | A6 | `/rtk show` 报出台账位置 | `env -u RTK_DB_PATH node --test test/plugin-surface.test.ts` | 输出含 `history database` | ✅ |
 | A7 | 两份 README 都有前置安装章节 | `rg -c 'brew install rtk' README.md README.zh.md` | 各 1 | ✅ |
-| A8 | 全量检查 | `env -u RTK_DB_PATH node --run check` | `fail 0`、tsc 无输出 | ✅ 144/144 |
+| A8 | 全量检查 | `env -u RTK_DB_PATH node --run check` | `fail 0`、tsc 无输出 | ✅ 151/151 |
 
 ### 13.3 验红记录
 
@@ -475,3 +475,41 @@ pwsh 真机执行、grep 超限时的真实会话 e2e、`/rtk` 命令面与 sett
 
 - 只在本机 Linux 上实测 rtk 的默认库位置；Windows（`%LOCALAPPDATA%`）与 macOS（`~/Library/Application Support`）依赖 rtk 自身逻辑，插件不再自己拼路径，因此没有跨平台分支需要验。
 - `~user/...` 形式被显式拒绝（给出 warning），因为插件没有可靠方式展开它；需要该形式的人应填绝对路径。
+
+### 13.6 独立评审的 4 个中级发现与修复（2026-10-31，同一 PR 内）
+
+§13.1–13.5 那一轮合进 main 后，独立子代理复审 HEAD `7b5982e` 又找出 4 个中级问题，其中两个会打穿「台账不落工作目录」的承诺。逐条实测确认后修掉。
+
+| # | 发现 | 实测复现 | 修法 |
+|---|---|---|---|
+| M1 | 填裸 `~` / `~/` 时返回的是**家目录本身**，rtk 当目录用会静默丢账 | `RTK_DB_PATH=/tmp/v1/dir rtk ls /` → exit 0、目录空；随后 `rtk gain` → `unable to open database file` | 拒绝「目录型」值：裸 `~`、`~/`、`/`、任何以分隔符结尾的路径都判为目录，warning 里给出可用的文件路径 |
+| M2 | `isAbsolutePath` 与平台无关，Windows 路径在 POSIX 上被当绝对路径注入，台账写进 cwd | `RTK_DB_PATH='C:\data\history.db' rtk ls /` (cwd=/tmp/v2/cwd) → 生成 `/tmp/v2/cwd/C:\data\history.db`（52K SQLite）；UNC 同理 | 分辨率改为按平台判定，改用 `node:path` 的 `win32.isAbsolute` / `posix.isAbsolute`；跨平台写法单列一条针对性 warning |
+| M3 | `/rtk show` 报「配置值」而非「实际生效值」，环境已有 `RTK_DB_PATH` 时该行会撒谎 | config=`/var/lib/dsh-rtk/history.db` + ambient=`/custom/rtk.db` → 实际命令不带注入，show 仍打印配置路径 | `HistoryDbReport` 加 `ambient` 字段；ambient 非空时显示它并注明 `historyDbPath is ignored` |
+| M4 | `test/integration.test.ts` 的注入用例依赖 shell 环境变量，本地有 `RTK_DB_PATH` 时假红 | `node --run check`（保留 ambient）→ 143 pass / 1 fail；`env -u RTK_DB_PATH` → 全绿 | 新增 `withAmbientRtkDbPath()` 夹具，用例内显式 pin / 清空并在 finally 恢复；另补一条「ambient 优先」用例 |
+
+顺带修的低级项：
+
+- `src/command.ts` 的 `getHistoryDbResolution?().warning` 外层字段没有生产者，删掉（M3 改用 `ambient`）。
+- `test/schema-contract.test.ts` 的 volatile 字段清单补上 `historyDbPath`，让新字段的活编辑契约有回归锁。
+- `src/rtk-rewrite.ts` 的 `applyRtkHistoryScope` 注释仍写 "isolated … scratch directory"，与「默认不注入」不符，改写。
+- §13.2 表里 A3 写「14/14」、A8 写「144/144」，与实际不符（`test/history-db.test.ts` 当时是 7 个用例；A8 是 144），已改成 12/12 与 151/151。
+
+### 13.7 修复后复验
+
+```
+$ env -u RTK_DB_PATH node --run check
+ℹ tests 151 / pass 151 / fail 0        # tsc 无输出
+
+$ node --run check                       # 保留本机 ambient RTK_DB_PATH
+ℹ pass 151 / fail 0                      # M4 修好后不再假红
+```
+
+平台判定的边界行为（用 `node:path` 的真实语义核对过，没有手写正则近似）：
+
+| 值 | linux | win32 |
+|---|---|---|
+| `/data/history.db` | 接受 | 接受（Windows 上 `/` 是「当前盘根」，`win32.isAbsolute` 为 true） |
+| `C:\data\history.db` | 拒绝（判为跨平台写法） | 接受 |
+| `C:data\history.db` | 拒绝 | 拒绝（盘符相对路径，`win32.isAbsolute` 为 false） |
+| `\\srv\share\history.db` | 拒绝 | 接受 |
+| `~`、`~/`、`/var/lib/rtk/` | 拒绝（判为目录） | 拒绝（判为目录） |

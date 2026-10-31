@@ -192,7 +192,13 @@ The configuration is also editable live in the harness settings document, and ta
 > | `~/.local/share/rtk/history.db` | Leading `~` expanded to your home directory |
 > | `isolated` | `<tmpdir>/dsh-rtk/history.db` — the pre-0.1.3 behavior: kept out of your home, but cleared on reboot and invisible to `rtk gain` |
 >
-> A relative path is refused rather than resolved against the current directory (that would drop the ledger into whatever project is running). A refusal costs the scoping only — the command still runs rewritten — and `/rtk show` reports it on its `history database` line. An `RTK_DB_PATH` already in your environment always wins.
+> Three values are refused on purpose, because rtk would fail in ways you cannot see:
+>
+> - **A relative path** — resolving it against the current directory would drop the ledger into whatever project is running.
+> - **A directory** (`~`, `~/`, `/var/lib/rtk/`) — rtk treats `RTK_DB_PATH` as a database *file*. Handed a directory it exits 0, writes nowhere, and only `rtk gain` later reports "unable to open database file". The whole ledger is lost silently.
+> - **Another platform's path syntax** — `C:\data\history.db` is an ordinary relative filename on Linux/macOS, so rtk would create it in the working directory.
+>
+> A refusal costs the scoping only — the command still runs rewritten — and `/rtk show` reports the reason on its `history database` line. An `RTK_DB_PATH` already in your environment always wins; that line names it, so you can see which database is actually in play.
 
 ## Commands
 

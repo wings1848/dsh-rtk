@@ -378,7 +378,13 @@ export function apply(ctx: Context, rawConfig: RtkConfig): void {
       getMetrics: () => metrics.summary(),
       clearMetrics: () => metrics.clear(),
       configLocation: () => bridge.note,
-      getHistoryDbResolution: () => ({ resolution: resolveHistoryDbPath(config.historyDbPath) }),
+      // The ambient value is part of the report on purpose: when it is set the
+      // plugin injects nothing, so reporting the configured path would point the
+      // user at a database that is not being written.
+      getHistoryDbResolution: () => ({
+        resolution: resolveHistoryDbPath(config.historyDbPath),
+        ambient: process.env.RTK_DB_PATH,
+      }),
     })
     ctx.effect(() => commands.register(command), 'dsh-rtk.command')
   }

@@ -33,7 +33,7 @@ function parse(raw: unknown): Record<string, unknown> {
 describe('Config schema on real schemastery', () => {
   it('loads, fills defaults, and wraps every top-level field in a live reference', () => {
     const value = parse({})
-    for (const field of ['enabled', 'mode', 'rtkExecutable', 'outputCompaction']) {
+    for (const field of ['enabled', 'mode', 'rtkExecutable', 'historyDbPath', 'outputCompaction']) {
       assert.ok(isVolatile(value[field]), `field ${field} must be live-editable (a Volatile reference)`)
     }
   })

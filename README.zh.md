@@ -184,7 +184,13 @@ agentPresets.copy('standard', 'rtk', 'RTK 优化')
 > | `~/.local/share/rtk/history.db` | 开头的 `~` 展开成你的家目录 |
 > | `isolated` | `<tmpdir>/dsh-rtk/history.db`——0.1.3 之前的老行为：不落家目录，但重启清零、`rtk gain` 看不到 |
 >
-> 相对路径会被**拒绝**，而不是拿去和当前目录拼：那会把台账写进你碰巧正在跑的项目里。拒绝只损失「注入」这一步，命令照样按改写后的形式执行，`/rtk show` 的 `history database` 行会说明原因。环境里已有的 `RTK_DB_PATH` 永远优先。
+> 有三类值会被**故意拒绝**，因为 rtk 在这几种情况下会「无声失败」：
+>
+> - **相对路径**——拿去和当前目录拼，会把台账写进你碰巧正在跑的项目里。
+> - **目录**（`~`、`~/`、`/var/lib/rtk/`）——rtk 把 `RTK_DB_PATH` 当成数据库**文件**。给它一个目录，它退出码 0、什么都不写，直到你跑 `rtk gain` 才报 `unable to open database file`，整个台账无声丢掉。
+> - **另一个平台的路径写法**——`C:\data\history.db` 在 Linux/macOS 上只是一个普通相对文件名，rtk 会把它建在当前工作目录里。
+>
+> 拒绝只损失「注入」这一步，命令照样按改写后的形式执行，`/rtk show` 的 `history database` 行会说明原因。环境里已有的 `RTK_DB_PATH` 永远优先，且该行会直接显示它，让你看到实际生效的是哪个库。
 
 ## 命令
 

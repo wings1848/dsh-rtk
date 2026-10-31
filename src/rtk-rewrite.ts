@@ -86,8 +86,13 @@ export type ShellKind = 'posix' | 'powershell'
 const PWSH_ASSIGNMENT = /^\$env:RTK_DB_PATH\s*=/
 
 /**
- * Prefix a command with an isolated `RTK_DB_PATH` so rtk's usage history lands
- * in a scratch directory instead of the working tree.
+ * Prefix a command with a chosen `RTK_DB_PATH` so rtk's usage history lands
+ * where the deployment asked for it, rather than wherever rtk would default to.
+ *
+ * The caller decides *whether* to scope at all. By default it does not: rtk's
+ * own per-platform database is the one the user's terminal `rtk gain` reads, so
+ * leaving it alone is what makes the two sides agree. `historyDbPath` selects an
+ * explicit location when someone wants one.
  *
  * The two shells need different syntax: `export NAME='value'` is a syntax error
  * in PowerShell, which spells the same thing `$env:NAME = 'value'`. Both the

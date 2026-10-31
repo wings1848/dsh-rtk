@@ -88,6 +88,27 @@ function bashExecution(command: string): any {
   return { name: 'bash', callId: 'call-1', arguments: { command, description: 'test' }, signal: new AbortController().signal }
 }
 
+/**
+ * Run a case with `RTK_DB_PATH` set or cleared for its duration.
+ *
+ * The ledger scoping reads the ambient environment by design (an explicit value
+ * there wins over the plugin's own setting), so a case that asserts on the
+ * injected prefix must pin that variable — otherwise a developer whose shell
+ * exports it sees the suite fail locally while CI, which is clean, stays green.
+ * Restoring the previous value keeps the mutation from leaking into other files.
+ */
+async function withAmbientRtkDbPath(value: string | undefined, run: () => Promise<void>): Promise<void> {
+  const previous = process.env.RTK_DB_PATH
+  if (value === undefined) delete process.env.RTK_DB_PATH
+  else process.env.RTK_DB_PATH = value
+  try {
+    await run()
+  } finally {
+    if (previous === undefined) delete process.env.RTK_DB_PATH
+    else process.env.RTK_DB_PATH = previous
+  }
+}
+
 describe('apply() wiring', () => {
   it('registers a tools/execute and a tools/post-execute listener', () => {
     const harness = fakeContext()
@@ -120,18 +141,39 @@ describe('apply() wiring', () => {
   })
 
   it('scopes the ledger when a path is configured', { skip: rtkSkip }, async () => {
-    const harness = fakeContext()
-    apply(harness.ctx, normalizeConfig({ historyDbPath: '/var/lib/dsh-rtk/history.db' }) as never)
+    await withAmbientRtkDbPath(undefined, async () => {
+      const harness = fakeContext()
+      apply(harness.ctx, normalizeConfig({ historyDbPath: '/var/lib/dsh-rtk/history.db' }) as never)
 
-    const exec = bashExecution('git status')
-    let seenByBody: unknown
-    await harness.emit('tools/execute', exec, async () => {
-      seenByBody = (exec.arguments as { command: string }).command
-      return { isError: false, value: 'ok', content: [] }
+      const exec = bashExecution('git status')
+      let seenByBody: unknown
+      await harness.emit('tools/execute', exec, async () => {
+        seenByBody = (exec.arguments as { command: string }).command
+        return { isError: false, value: 'ok', content: [] }
+      })
+
+      assert.match(String(seenByBody), /export RTK_DB_PATH='\/var\/lib\/dsh-rtk\/history\.db'/)
+      assert.match(String(seenByBody), /\brtk git status$/)
     })
+  })
 
-    assert.match(String(seenByBody), /export RTK_DB_PATH='\/var\/lib\/dsh-rtk\/history\.db'/)
-    assert.match(String(seenByBody), /\brtk git status$/)
+  it('lets an ambient RTK_DB_PATH win over the configured one', { skip: rtkSkip }, async () => {
+    // The approved escape hatch: a deployment can pin one ledger through the
+    // environment, and no plugin setting may quietly override it.
+    await withAmbientRtkDbPath('/srv/rtk/shared.db', async () => {
+      const harness = fakeContext()
+      apply(harness.ctx, normalizeConfig({ historyDbPath: '/var/lib/dsh-rtk/history.db' }) as never)
+
+      const exec = bashExecution('git status')
+      let seenByBody: unknown
+      await harness.emit('tools/execute', exec, async () => {
+        seenByBody = (exec.arguments as { command: string }).command
+        return { isError: false, value: 'ok', content: [] }
+      })
+
+      assert.doesNotMatch(String(seenByBody), /RTK_DB_PATH=/, 'the ambient value must not be re-injected')
+      assert.match(String(seenByBody), /\brtk git status$/)
+    })
   })
 
   it('leaves the command unscoped when the configured path is unusable', { skip: rtkSkip }, async () => {
