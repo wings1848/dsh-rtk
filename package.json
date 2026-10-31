@@ -73,7 +73,7 @@
     "@deepseek-ai/dsh-tools": "^0.2.0-rc.2",
     "@deepseek-ai/schemastery": "^3.18.4",
     "@types/node": "^22.0.0",
-    "typescript": "^5.9.0"
+    "typescript": "^7.0.2"
   },
   "publishConfig": {
     "registry": "https://registry.npmjs.org/",
