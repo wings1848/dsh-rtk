@@ -21,6 +21,21 @@ describe('normalizeConfig', () => {
     // On by default: a missing binary otherwise costs the user the whole
     // feature without a word. Emitted once per session, so the cost is bounded.
     assert.equal(config.notifyWhenRtkMissing, true)
+    // Empty means "let rtk pick its own database", so the agent and the user's
+    // terminal `rtk gain` read the same ledger and it survives a reboot.
+    assert.equal(config.historyDbPath, '')
+  })
+
+  it('takes a history database location as free-form text', () => {
+    // The value is interpreted by `resolveHistoryDbPath`, which reports an
+    // unusable one as a warning; normalization must not silently drop it and
+    // pretend the default was configured.
+    assert.equal(normalizeConfig({ historyDbPath: 'isolated' }).historyDbPath, 'isolated')
+    assert.equal(
+      normalizeConfig({ historyDbPath: '~/.local/share/rtk/history.db' }).historyDbPath,
+      '~/.local/share/rtk/history.db',
+    )
+    assert.equal(normalizeConfig({ historyDbPath: 42 }).historyDbPath, DEFAULT_CONFIG.historyDbPath)
   })
 
   it('keeps lossy read compaction off by default', () => {

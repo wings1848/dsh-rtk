@@ -30,7 +30,7 @@
 - **rtk 始终是唯一事实来源。** 插件不带自己的重写表，而是通过 `rtk rewrite` 询问已安装的二进制，所以支持范围跟随你装的 rtk 版本。
 - **`rewrite` 与 `suggest` 两种模式。** `rewrite` 替换命令；`suggest` 原样执行并报告本可使用的等价命令。
 - **运行时守卫。** `guardWhenRtkMissing`（默认开）下，无法确认 rtk 可用的调用会执行原命令——缺少优化器永远不会挡住工作。
-- 被改写的命令会带上隔离的 `RTK_DB_PATH`，rtk 的使用历史不会落进工作目录。
+- 被改写的命令不会把 rtk 的使用历史写进工作目录：默认沿用 rtk 自己的用户级库，也可以用 `historyDbPath` 指定确切位置。
 
 ### 输出压缩
 
@@ -68,6 +68,29 @@
 ## 安装
 
 **支持的宿主**：dsh 0.1.5、0.1.7、0.2.0 三代，每代都实测过，证据见 [`docs/verification.md`](docs/verification.md)。Node >= 22.18。
+
+### 0. 前置：先装 rtk 二进制
+
+**`dsh-rtk` 是包在 rtk 外面的插件，不是 rtk 的替代品。** `PATH` 上找不到 `rtk` 时，没有东西可改写、也没有东西可压缩，插件会静默停摆：命令原样执行、输出不压缩，看起来就是「什么都没发生」。这是唯一一种从外面看不出来的失败——整个会话只会多一行提示（`[rtk] rtk not found; rewriting is off`），夹在工具输出里很容易漏看。
+
+所以先装 rtk：
+
+```bash
+brew install rtk                        # macOS / Linux（Homebrew，推荐）
+winget install rtk-ai.rtk               # Windows
+curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh
+cargo install --git https://github.com/rtk-ai/rtk
+```
+
+> **不要用 `cargo install rtk`（不带 `--git`）。** crates.io 上有一个同名但无关的 crate，只有上面带 `--git` 的那条才装的是本工具。
+
+装完先验一下，必须能打印版本号再往下走：
+
+```bash
+rtk --version
+```
+
+会话里也可以用 `/rtk verify` 查同一件事，失败时它会直接打印上面这些安装方式。
 
 ### 1. 安装包
 
@@ -120,6 +143,7 @@ agentPresets.copy('standard', 'rtk', 'RTK 优化')
     guardWhenRtkMissing: true        # rtk 不可用时执行原命令
     showRewriteNotifications: false  # 在结果末尾附加一行改写说明
     rtkExecutable: rtk               # 名字或绝对路径
+    historyDbPath: ''                # '' = 用 rtk 自己的库；也可填绝对路径、~/ 路径，或 isolated
     rewriteTimeoutMs: 3000           # 单次 `rtk rewrite` 的截止时间
     compactedTools: [bash, read, grep]
     outputCompaction:
@@ -150,6 +174,17 @@ agentPresets.copy('standard', 'rtk', 'RTK 优化')
 > **行放在哪，决定设置可不可写（dsh 0.1.7+）。** home patch（`~/.dsh/cordis.patch.yml`）里的行是**只读**的：服务会拒绝被低层覆盖的写，`/rtk reset` 也会如实报告这个拒绝。想保留在线调参，就把行放进 profile 的组合里。
 
 > **为什么 `readCompaction` 默认关。** 过滤或截断 `read` 结果，可能让模型拿到的文本与文件不再一致，编辑就会失配。默认开启的每一项，要么对它归纳的正文是无损的，要么只作用于整个形态都会被替换掉的输出。
+
+> **rtk 的使用台账写在哪，为什么默认「不插手」。** 只有在 `historyDbPath` 指定了位置时，被改写的命令才会带 `RTK_DB_PATH`。默认空值表示完全不注入，交给 rtk 自己按平台写默认库（Linux 上是 `~/.local/share/rtk/history.db`，并遵循 `XDG_DATA_HOME`）——也就是你终端里 `rtk gain` 读的同一个库，重启也不会清零。可填的值：
+>
+> | `historyDbPath` | 效果 |
+> |---|---|
+> | `''`（默认）或 `default` | 不注入，由 rtk 决定 |
+> | `/var/lib/dsh-rtk/history.db` | 原样使用该绝对路径 |
+> | `~/.local/share/rtk/history.db` | 开头的 `~` 展开成你的家目录 |
+> | `isolated` | `<tmpdir>/dsh-rtk/history.db`——0.1.3 之前的老行为：不落家目录，但重启清零、`rtk gain` 看不到 |
+>
+> 相对路径会被**拒绝**，而不是拿去和当前目录拼：那会把台账写进你碰巧正在跑的项目里。拒绝只损失「注入」这一步，命令照样按改写后的形式执行，`/rtk show` 的 `history database` 行会说明原因。环境里已有的 `RTK_DB_PATH` 永远优先。
 
 ## 命令
 

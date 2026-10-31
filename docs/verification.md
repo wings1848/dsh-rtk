@@ -418,3 +418,60 @@ pwsh 真机执行、grep 超限时的真实会话 e2e、`/rtk` 命令面与 sett
 - **未做 0.2.0 真宿主的 11.6 式六轮 e2e**：依据是 0.2.0-rc.1 与 0.2.0-rc.2 的 `lib/types` 零差异、两轮130 项测试全绿，加上本机 0.2.0-rc.1 宿主上插件确实在改写命令。要补就照 11.6 的配方换 0.2.0 重跑。
 - 守卫测试只在「devDeps 也前移」时报警：如果只升级宿主而不动 devDeps，仍要人工记得加一行 peer 范围（这是 semver prerelease 规则的固有形状，无法前瞻未来 rc 系）。
 
+
+## 13. 台账位置可配置 + 安装前置说明（2026-10-31，issue #12 / #11）
+
+日期：2026-10-31 · 环境：Node v26.12.0 · rtk 1.1.0 · DSH 0.2.1-rc.5
+
+### 13.1 事实核对
+
+| 断言 | 命令 | 实测输出 |
+|---|---|---|
+| rtk 默认把台账写在 `$HOME/.local/share/rtk/history.db` | `rm -rf /tmp/ph && mkdir /tmp/ph && env -u RTK_DB_PATH -u XDG_DATA_HOME HOME=/tmp/ph rtk ls / >/dev/null 2>&1; find /tmp/ph -name '*.db'` | `/tmp/ph/.local/share/rtk/history.db` |
+| 设置 `XDG_DATA_HOME` 时跟随它 | `rm -rf /tmp/x1 && mkdir /tmp/x1 && env -u RTK_DB_PATH XDG_DATA_HOME=/tmp/x1 rtk ls / >/dev/null 2>&1; find /tmp/x1 -name '*.db'` | `/tmp/x1/rtk/history.db` |
+| `RTK_DB_PATH` 指向不存在的多级目录时 rtk 自己建父目录 | `RTK_DB_PATH=/tmp/mk/a/b/h.db rtk ls / >/dev/null 2>&1; ls -l /tmp/mk/a/b/` | `h.db` 存在（52K） |
+| rtk 不会把台账写进当前工作目录 | `cd /tmp/cwdprobe && env -u RTK_DB_PATH HOME=/home/wings rtk ls <dir> >/dev/null; ls -A /tmp/cwdprobe` | 空（无新文件） |
+| 12 个并发 rtk 进程写同一台账全部成功 | `for i in $(seq 12); do (RTK_DB_PATH=/tmp/conc/h.db rtk ls <dir> >/dev/null 2>&1; echo $?) & done; wait` | 12 个 `exit=0`，无 stderr |
+| 插件旧行为确实硬编码 tmpdir | `git show 6dbcdea:src/index.ts \| rg -n 'tmpdir\|history.db'` | `join(tmpdir(), 'dsh-rtk', 'history.db')` |
+
+### 13.2 验收标准表
+
+| # | 标准 | 判定命令 | 期望输出 | 实测 |
+|---|---|---|---|---|
+| A1 | 默认不注入 `RTK_DB_PATH` | `env -u RTK_DB_PATH node --test test/integration.test.ts` | 「默认不 scope 台账」用例通过 | ✅ |
+| A2 | 新增 `historyDbPath`，默认空串 | `env -u RTK_DB_PATH node -e "import('./lib/config.js').then(m=>console.log(JSON.stringify(m.normalizeConfig({}).historyDbPath)))"` | `""` | ✅ |
+| A3 | `isolated` 回退 tmpdir，`~/` 展开为绝对路径 | `env -u RTK_DB_PATH node --test test/history-db.test.ts` | 14/14 通过 | ✅ |
+| A4 | 相对路径被拒绝并给 warning | 同上 | warning 含 `absolute` | ✅ |
+| A5 | 显式路径真正注入命令 | `env -u RTK_DB_PATH node --test test/integration.test.ts` | 命令含 `export RTK_DB_PATH='/var/lib/dsh-rtk/history.db'` | ✅ |
+| A6 | `/rtk show` 报出台账位置 | `env -u RTK_DB_PATH node --test test/plugin-surface.test.ts` | 输出含 `history database` | ✅ |
+| A7 | 两份 README 都有前置安装章节 | `rg -c 'brew install rtk' README.md README.zh.md` | 各 1 | ✅ |
+| A8 | 全量检查 | `env -u RTK_DB_PATH node --run check` | `fail 0`、tsc 无输出 | ✅ 144/144 |
+
+### 13.3 验红记录
+
+新增用例在实现前跑，两处真实失败（日志 `runs/20261031-1657-dsh-rtk-issue/evidence/red.log`）：
+
+```
+✖ test/history-db.test.ts
+  Error [ERR_MODULE_NOT_FOUND]: Cannot find module '.../lib/history-db.js'
+✖ normalizeConfig > takes a history database location as free-form text
+  AssertionError: Expected values to be strictly equal:
+  + undefined
+  - 'isolated'
+```
+
+第一条是模块尚不存在，第二条是配置字段尚不存在——两者都不是「测试写错」，实现后全绿。
+
+### 13.4 不变量
+
+| 不变量 | 怎么保证 | 验证 |
+|---|---|---|
+| 环境里已有的 `RTK_DB_PATH` 仍然优先，不被覆盖 | `applyRtkHistoryScope` 的 `ambientValue` 分支未改动 | `test/rtk-rewrite.test.ts`「leaves an ambient RTK_DB_PATH alone」通过 |
+| 注入语法与引号转义不变（posix / powershell） | 未改 `applyRtkHistoryScope` 任一行 | `test/regressions.test.ts` D3 四条通过 |
+| 无效配置绝不让工具调用失败 | `resolveHistoryDbPath` 只返回 `warning`，不抛错；注入点按 `path === undefined` 跳过 | integration「leaves the command unscoped when the configured path is unusable」通过 |
+| 结果尾部 `[exit code: N]` 标记不被挤走 | 未改 `appendNotice` | 既有用例通过 |
+
+### 13.5 已知限制
+
+- 只在本机 Linux 上实测 rtk 的默认库位置；Windows（`%LOCALAPPDATA%`）与 macOS（`~/Library/Application Support`）依赖 rtk 自身逻辑，插件不再自己拼路径，因此没有跨平台分支需要验。
+- `~user/...` 形式被显式拒绝（给出 warning），因为插件没有可靠方式展开它；需要该形式的人应填绝对路径。

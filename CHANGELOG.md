@@ -2,8 +2,31 @@
 
 ## Unreleased
 
+### Fixed
+
+- **The usage ledger is no longer forced into `tmpdir()`** (issue #12). Rewritten
+  commands used to run under `RTK_DB_PATH=<tmpdir>/dsh-rtk/history.db`, which had
+  two consequences: `/tmp` is tmpfs on most Linux distributions, so the ledger
+  reset on every reboot and `/rtk stats` could only describe the current uptime;
+  and it is not the database the user's own `rtk gain` reads, so the terminal
+  said "No tracking data yet" while the agent had written hundreds of rows
+  somewhere else. The new `historyDbPath` setting defaults to `''`, which injects
+  nothing and lets rtk use its per-platform database — the same one `rtk gain`
+  reads, and one that survives a reboot. It also accepts an absolute path, a
+  `~/` path, and `isolated` for the previous tmpdir behavior. A relative path is
+  refused rather than resolved against the working directory (that would drop the
+  ledger into whichever project is running); a refusal costs the scoping only —
+  the command still runs rewritten — and `/rtk show` reports it on its new
+  `history database` line. An `RTK_DB_PATH` already in the environment still wins.
+
 ### Docs
 
+- **The install section now starts with the rtk binary** (issue #11). Both READMEs
+  gained a "Prerequisite" step with the four official install routes, the warning
+  that plain `cargo install rtk` installs an unrelated crate, and the
+  `rtk --version` check — because a missing binary is the one failure the plugin
+  can only degrade through, silently: commands run unchanged, output is not
+  compacted, and a single easily-missed line is all the user sees.
 - The install section now says up front that `dsh plugin add` only installs the
   package: the plugin manager shows "installed, not active" (「已安装，未生效」)
   until the step-2 preset row activates it, and that is expected. Both READMEs
