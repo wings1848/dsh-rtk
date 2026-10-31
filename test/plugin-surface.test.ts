@@ -156,6 +156,33 @@ describe('/rtk command', () => {
     assert.match(String((await withRefusal.handler({ rawInput: 'show' })).text), /refused: .*not an absolute path/)
   })
 
+  it('reports the ledger actually in effect when the ambient value wins', async () => {
+    // The line exists to explain "why does my terminal `rtk gain` not match?".
+    // When an ambient RTK_DB_PATH is set the plugin injects nothing, so printing
+    // the configured path would point the reader at a database nobody writes —
+    // the exact confusion the line was added to remove.
+    const ambientWins = createRtkCommand({
+      ...baseController(),
+      getHistoryDbResolution: () => ({
+        resolution: { path: '/var/lib/dsh-rtk/history.db' },
+        ambient: '/srv/rtk/shared.db',
+      }),
+    })
+    const text = String((await ambientWins.handler({ rawInput: 'show' })).text)
+    assert.match(text, /history database\s+\/srv\/rtk\/shared\.db/, 'the ambient path must be the one reported')
+    assert.doesNotMatch(text, /history database\s+\/var\/lib/, 'the ignored configured value must not be shown as effective')
+    assert.match(text, /historyDbPath is ignored/, 'the report must say why the setting is not in play')
+
+    // An empty or whitespace-only ambient value is not a real override.
+    for (const ambient of ['', '   ']) {
+      const empty = createRtkCommand({
+        ...baseController(),
+        getHistoryDbResolution: () => ({ resolution: { path: '/var/lib/dsh-rtk/history.db' }, ambient }),
+      })
+      assert.match(String((await empty.handler({ rawInput: 'show' })).text), /\/var\/lib\/dsh-rtk\/history\.db/)
+    }
+  })
+
   it('still reports a ledger line when the controller has no accessor', async () => {
     const result = await createRtkCommand(baseController()).handler({ rawInput: 'show' })
     assert.equal(result.kind, 'success')

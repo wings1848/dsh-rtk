@@ -3,6 +3,14 @@ import type { HistoryDbResolution } from './history-db.js'
 import type { MetricsSummary } from './metrics.js'
 import type { RtkRuntimeStatus } from './runtime-guard.js'
 
+/** What `/rtk show` needs to explain where the usage ledger ends up. */
+export interface HistoryDbReport {
+  /** Where the configured value points, after platform and directory checks. */
+  resolution: HistoryDbResolution
+  /** An `RTK_DB_PATH` already in the environment; it wins over the setting. */
+  ambient?: string | undefined
+}
+
 /** Everything the `/rtk` command needs from the plugin. */
 export interface RtkCommandController {
   getConfig(): RtkConfig
@@ -24,9 +32,9 @@ export interface RtkCommandController {
    * Where rewritten commands send rtk's usage ledger.
    *
    * Optional so a controller in a test (or an older row) need not implement it:
-   * the report then simply omits the line.
+   * the report then simply names rtk's own default.
    */
-  getHistoryDbResolution?(): { resolution: HistoryDbResolution; warning?: string }
+  getHistoryDbResolution?(): HistoryDbReport
 }
 
 /** The command result shape the harness normalizes. */
@@ -70,7 +78,7 @@ function configReport(
   config: RtkConfig,
   status: RtkRuntimeStatus,
   location: string,
-  historyDb: { resolution: HistoryDbResolution; warning?: string } | undefined,
+  historyDb: HistoryDbReport | undefined,
 ): string {
   const compaction = config.outputCompaction
   const lines = [
@@ -103,17 +111,22 @@ function configReport(
 }
 
 /**
- * One line describing where the usage ledger goes.
+ * One line describing where the usage ledger actually goes.
  *
- * The default case matters more than it looks: users who see the agent working
- * but `rtk gain` empty need to be told, from inside the tool, which database
- * each side writes to.
+ * This line exists to answer "why does my terminal `rtk gain` not match what the
+ * agent did?", so it must report the *effective* location, not the configured
+ * one. Those differ whenever the ambient `RTK_DB_PATH` wins: the plugin then
+ * injects nothing at all, and printing the configured path would send the reader
+ * looking in the wrong database — the exact confusion the line was added to
+ * prevent.
  */
-function describeHistoryDb(historyDb: { resolution: HistoryDbResolution; warning?: string } | undefined): string {
+function describeHistoryDb(historyDb: HistoryDbReport | undefined): string {
   if (historyDb === undefined) return 'rtk default'
-  const { resolution, warning } = historyDb
-  const note = warning ?? resolution.warning
-  if (note !== undefined) return `rtk default (configured value refused: ${note})`
+  const { resolution, ambient } = historyDb
+  if (ambient !== undefined && ambient.trim() !== '') {
+    return `${ambient} (from the ambient RTK_DB_PATH; historyDbPath is ignored)`
+  }
+  if (resolution.warning !== undefined) return `rtk default (configured value refused: ${resolution.warning})`
   if (resolution.path === undefined) return 'rtk default (shared with `rtk gain`)'
   return resolution.path
 }
