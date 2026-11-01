@@ -85,3 +85,27 @@ jobs:
 
           echo "::error::publish failed with exit ${code}"
           exit "$code"
+
+  # The tag is the release note anchor: publishing to npm without a GitHub
+  # release leaves the repository's Releases page permanently stale, and doing it
+  # here means the same tag drives both. Idempotent, like the publish step.
+  release:
+    name: create the GitHub release
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: create the release unless it exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "::notice::release $tag already exists; nothing to do."
+            exit 0
+          fi
+          gh release create "$tag" --title "$tag" --generate-notes

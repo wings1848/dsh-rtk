@@ -87,20 +87,21 @@ describe('legacy settings provider (dsh 0.1.5)', () => {
 
   it('registers the dsh-rtk namespace with the composition as its base', () => {
     const { provider, calls } = fakeProvider()
-    const bridge = createSettingsBridge(fakeContext({ settings: provider }).ctx, { enabled: true })
+    const bridge = createSettingsBridge(fakeContext({ settings: provider }).ctx, { mode: 'rewrite' })
     assert.deepEqual(calls.registered.map((entry) => entry.ns), ['dsh-rtk'])
-    assert.deepEqual(calls.registered[0]?.base, { enabled: true })
+    assert.deepEqual(calls.registered[0]?.base, { mode: 'rewrite' })
     assert.match(bridge.note, /`dsh-rtk` namespace/)
   })
 
   it('reads the provider value and reports a reset that replaces the user layer', async () => {
     const { provider, calls, set } = fakeProvider()
     const bridge = createSettingsBridge(fakeContext({ settings: provider }).ctx, {})
-    set({ enabled: false })
-    assert.equal(bridge.read().enabled, false)
-    const message = await bridge.reset()
+    set({ mode: 'off' })
+    assert.equal(bridge.read().mode, 'off')
+    const result = await bridge.reset()
     assert.deepEqual(calls.replaced, [{}])
-    assert.match(message, /user overrides cleared/)
+    assert.equal(result.ok, true)
+    assert.match(result.text, /values it inherits from the composition/)
   })
 
   it('follows a namespace owned by another instance instead of failing', async () => {
@@ -125,7 +126,9 @@ describe('legacy settings provider (dsh 0.1.5)', () => {
     harness.emit('settings/updated', 'dsh-rtk', {})
     assert.equal(changes, 1)
 
-    assert.match(await bridge.reset(), /does not own the settings namespace/)
+    const result = await bridge.reset()
+    assert.equal(result.ok, false)
+    assert.match(result.text, /does not own the settings namespace/)
   })
 })
 
@@ -143,11 +146,11 @@ describe('modern settings host (dsh 0.1.7)', () => {
 
   it('reads live values through the running references', () => {
     const { forms } = fakeForms()
-    const enabled = ref(true)
-    const bridge = createSettingsBridge(fakeContext({ settings: forms }).ctx, { enabled })
-    assert.equal(bridge.read().enabled, true)
-    ;(enabled as unknown as { [WRITE]: (next: unknown) => void })[WRITE](false)
-    assert.equal(bridge.read().enabled, false, 'the committed edit must be visible without a remount')
+    const mode = ref('rewrite')
+    const bridge = createSettingsBridge(fakeContext({ settings: forms }).ctx, { mode })
+    assert.equal(bridge.read().mode, 'rewrite')
+    ;(mode as unknown as { [WRITE]: (next: unknown) => void })[WRITE]('off')
+    assert.equal(bridge.read().mode, 'off', 'the committed edit must be visible without a remount')
   })
 
   it('refreshes on loader/volatile-update and resets its own entry', async () => {
@@ -160,7 +163,9 @@ describe('modern settings host (dsh 0.1.7)', () => {
     harness.emit('loader/volatile-update', [['enabled']])
     assert.equal(changes, 1)
 
-    assert.match(await bridge.reset(), /user overrides cleared/)
+    const reset = await bridge.reset()
+    assert.equal(reset.ok, true)
+    assert.match(reset.text, /values it inherits from the composition/)
     assert.deepEqual(calls.replaced, [{ ns: 'rtk', section: {} }], 'reset must name the entry the plugin runs as')
     assert.match(bridge.note, /`rtk` entry/)
   })
@@ -177,22 +182,90 @@ describe('modern settings host (dsh 0.1.7)', () => {
     }
     const harness = fakeContext({ settings: forms }, { fiber: { entry: { options: { id: 'rtk' } } } })
     const bridge = createSettingsBridge(harness.ctx, {})
-    const message = await bridge.reset()
-    assert.match(message, /reset was refused \(Plugin entry "rtk" has no volatile fields\)/)
-    assert.match(message, /composition `config:` block/, 'the way out must stay visible')
+    const result = await bridge.reset()
+    assert.equal(result.ok, false, 'a refused reset must not read as a success')
+    assert.match(result.text, /reset was refused \(Plugin entry "rtk" has no volatile fields\)/)
+    assert.match(result.text, /composition `config:` block/, 'the way out must stay visible')
   })
 
   it('survives a modern surface without replace at all', async () => {
     const harness = fakeContext({ settings: { describe: () => [] } }, { fiber: { entry: { options: { id: 'rtk' } } } })
     const bridge = createSettingsBridge(harness.ctx, {})
-    assert.match(await bridge.reset(), /reset was refused/)
+    const result = await bridge.reset()
+    assert.equal(result.ok, false)
+    assert.match(result.text, /reset was refused/)
   })
 
   it('never resets a different entry when its own id cannot be resolved', async () => {
     const { forms, calls } = fakeForms()
     const bridge = createSettingsBridge(fakeContext({ settings: forms }).ctx, {})
-    assert.match(await bridge.reset(), /composition `config:` block/)
+    const result = await bridge.reset()
+    assert.equal(result.ok, false)
+    assert.match(result.text, /composition `config:` block/)
     assert.deepEqual(calls.replaced, [], 'a blind reset could wipe a sibling plugin’s settings')
+  })
+})
+
+describe('auto-detected executable write-back', () => {
+  /** A modern form surface that records path-addressed edits. */
+  function mutableForms(options: { writable?: boolean; fail?: boolean } = {}) {
+    const ops: Array<{ ns: string; ops: readonly object[] }> = []
+    const forms = {
+      describe: () => [],
+      ...(options.writable === undefined ? {} : { writable: options.writable }),
+      mutate: async (ns: string, next: readonly object[]) => {
+        if (options.fail === true) throw new Error('Configuration for "rtk" is overridden by a home patch')
+        ops.push({ ns, ops: next })
+      },
+      replace: async () => {},
+    }
+    return { forms, ops }
+  }
+
+  it('writes exactly one field through mutate', async () => {
+    const { forms, ops } = mutableForms()
+    const bridge = createSettingsBridge(
+      fakeContext({ settings: forms }, { fiber: { entry: { options: { id: 'rtk' } } } }).ctx,
+      {},
+    )
+    assert.equal(bridge.writable, true)
+    assert.equal(await bridge.persistRtkExecutable('C:\\tools\\rtk.exe'), true)
+    assert.deepEqual(ops, [
+      { ns: 'rtk', ops: [{ op: 'set', path: ['rtkExecutable'], value: 'C:\\tools\\rtk.exe' }] },
+    ], 'a wholesale replace would pin every other field as a user override')
+  })
+
+  it('reports a refused write without throwing', async () => {
+    const { forms } = mutableForms({ fail: true })
+    const bridge = createSettingsBridge(
+      fakeContext({ settings: forms }, { fiber: { entry: { options: { id: 'rtk' } } } }).ctx,
+      {},
+    )
+    assert.equal(await bridge.persistRtkExecutable(''), false)
+  })
+
+  it('respects a read-only profile', async () => {
+    const { forms } = mutableForms({ writable: false })
+    const bridge = createSettingsBridge(
+      fakeContext({ settings: forms }, { fiber: { entry: { options: { id: 'rtk' } } } }).ctx,
+      {},
+    )
+    assert.equal(bridge.writable, false)
+    assert.equal(await bridge.persistRtkExecutable('C:\\tools\\rtk.exe'), false)
+  })
+
+  it('stays runtime-only where the generation has no path-addressed write', async () => {
+    const forms = { describe: () => [], replace: async () => {} }
+    const modern = createSettingsBridge(
+      fakeContext({ settings: forms }, { fiber: { entry: { options: { id: 'rtk' } } } }).ctx,
+      {},
+    )
+    assert.equal(modern.writable, false)
+    assert.equal(await modern.persistRtkExecutable(''), false)
+
+    const legacy = createSettingsBridge(fakeContext({ settings: { register: () => ({ get: () => ({}), watch: () => () => {}, replace: async () => {} }) } }).ctx, {})
+    assert.equal(legacy.writable, false)
+    assert.equal(await legacy.persistRtkExecutable(''), false)
   })
 })
 
@@ -201,9 +274,11 @@ describe('unknown settings generations', () => {
     for (const settings of [{}, { describe: 42 }, Object.create(null)]) {
       const harness = fakeContext({ settings })
       const bridge = createSettingsBridge(harness.ctx, { enabled: true })
-      assert.equal(bridge.read().enabled, true)
+      assert.equal(bridge.read().mode, 'rewrite')
       assert.match(bridge.note, /composition only/)
-      assert.match(await bridge.reset(), /composition `config:` block/)
+      const reset = await bridge.reset()
+      assert.equal(reset.ok, false)
+      assert.match(reset.text, /composition `config:` block/)
       let changes = 0
       assert.doesNotThrow(() => bridge.onChange(() => (changes += 1)))
       harness.emit('loader/volatile-update', [[]])
@@ -222,26 +297,24 @@ describe('unknown settings generations', () => {
     }
     const bridge = createSettingsBridge(fakeContext({ settings }).ctx, {})
     assert.match(bridge.note, /integration unavailable \(boom\)/)
-    assert.equal(bridge.read().enabled, true)
+    assert.equal(bridge.read().mode, 'rewrite')
   })
 })
 
 describe('Volatile values in normalizeConfig', () => {
   it('reads references at any depth, including one holding a subtree', () => {
     const config = normalizeConfig({
-      enabled: ref(false),
-      outputCompaction: ref({
-        truncate: { enabled: true, maxChars: ref(5000) },
-      }),
+      mode: ref('off'),
+      maxChars: ref(5000),
+      outputCompaction: ref({ truncate: { maxChars: ref(9000) } }),
     })
-    assert.equal(config.enabled, false)
-    assert.equal(config.outputCompaction.truncate.enabled, true)
-    assert.equal(config.outputCompaction.truncate.maxChars, 5000, 'nested references are read through too')
-    assert.equal(config.outputCompaction.stripAnsi, true, 'unlisted subtree fields fall back to defaults')
+    assert.equal(config.mode, 'off')
+    assert.equal(config.maxChars, 5000, 'top-level references are read through')
+    assert.equal(config.compact, true, 'retired subtree values fall back to defaults')
   })
 
   it('leaves plain values alone', () => {
-    const config = normalizeConfig({ rewriteTimeoutMs: 1234 })
-    assert.equal(config.rewriteTimeoutMs, 1234)
+    const config = normalizeConfig({ rtkExecutable: 'custom-rtk' })
+    assert.equal(config.rtkExecutable, 'custom-rtk')
   })
 })

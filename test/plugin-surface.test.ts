@@ -5,7 +5,7 @@ import { createRtkCommand } from '../lib/command.js'
 import { normalizeConfig } from '../lib/config.js'
 import { createMetricsTracker } from '../lib/metrics.js'
 import { parseExecutablePath, resolverNameFor, resolveRtkExecutable } from '../lib/rtk-executable.js'
-import { isStatusStale, shouldRequireRtkAvailability, shouldSkipRewrite } from '../lib/runtime-guard.js'
+import { isStatusStale, needsAvailabilityProbe, shouldSkipRewrite } from '../lib/runtime-guard.js'
 
 describe('rtk executable resolution', () => {
   it('picks the resolver command for the platform', () => {
@@ -22,12 +22,24 @@ describe('rtk executable resolution', () => {
     assert.equal(parseExecutablePath('   \n\n'), undefined)
   })
 
-  it('uses a configured path verbatim without probing PATH', async () => {
-    const resolution = await resolveRtkExecutable({ configured: '/opt/custom/rtk' })
+  it('uses an existing configured path verbatim without probing PATH', async () => {
+    const resolution = await resolveRtkExecutable({ configured: '/opt/custom/rtk', exists: async () => true })
     assert.equal(resolution.command, '/opt/custom/rtk')
     assert.equal(resolution.resolvedPath, '/opt/custom/rtk')
     assert.equal(resolution.resolver, 'configured')
     assert.equal(resolution.warning, undefined)
+  })
+
+  it('does not trust a configured path that is gone; it looks the name up again', async () => {
+    const resolution = await resolveRtkExecutable({
+      configured: '/opt/custom/rtk',
+      platform: 'linux',
+      resolverCommand: 'definitely-not-a-real-resolver',
+      exists: async () => false,
+    })
+    assert.equal(resolution.command, 'rtk', 'a stale path must not be handed to the probe')
+    assert.equal(resolution.resolver, 'which')
+    assert.match(String(resolution.warning), /could not resolve rtk/)
   })
 
   it('falls back to the bare name when the lookup fails, without throwing', async () => {
@@ -41,26 +53,28 @@ describe('rtk executable resolution', () => {
   })
 
   it('resolves a real binary when one is on PATH', async () => {
-    const resolution = await resolveRtkExecutable({ configured: 'sh' })
-    assert.equal(resolution.resolver, 'which')
-    assert.match(String(resolution.resolvedPath), /\/sh$/)
+    const resolution = await resolveRtkExecutable({ configured: 'node' })
+    assert.equal(resolution.resolver, resolverNameFor(process.platform))
+    assert.match(String(resolution.resolvedPath), /node(?:\.exe)?$/)
   })
 })
 
 describe('runtime guard', () => {
   const base = normalizeConfig({})
 
-  it('consults availability only in rewrite mode', () => {
-    assert.equal(shouldRequireRtkAvailability(base), true)
-    assert.equal(shouldRequireRtkAvailability(normalizeConfig({ mode: 'suggest' })), false)
-    assert.equal(shouldRequireRtkAvailability(normalizeConfig({ enabled: false })), false)
+  it('probes availability in every mode that can use an answer', () => {
+    assert.equal(needsAvailabilityProbe(base), true)
+    // `suggest` mode reports what rtk would do, so it cannot skip the probe —
+    // skipping it is how the mode used to report a missing binary that was
+    // installed and suggest nothing at all.
+    assert.equal(needsAvailabilityProbe(normalizeConfig({ mode: 'suggest' })), true)
+    assert.equal(needsAvailabilityProbe(normalizeConfig({ mode: 'off' })), false)
   })
 
-  it('stands rewriting down when rtk is missing and the guard is on', () => {
+  it('stands rewriting down when rtk is missing, and when the plugin is off', () => {
     assert.equal(shouldSkipRewrite(base, { rtkAvailable: false }), true)
     assert.equal(shouldSkipRewrite(base, { rtkAvailable: true }), false)
-    assert.equal(shouldSkipRewrite(normalizeConfig({ guardWhenRtkMissing: false }), { rtkAvailable: false }), false)
-    assert.equal(shouldSkipRewrite(normalizeConfig({ enabled: false }), { rtkAvailable: true }), true)
+    assert.equal(shouldSkipRewrite(normalizeConfig({ mode: 'off' }), { rtkAvailable: true }), true)
   })
 
   it('treats an unprobed or old status as stale', () => {
@@ -113,11 +127,12 @@ describe('/rtk command', () => {
   /** The controller every reporting case shares, minus the ledger accessor. */
   const baseController = () => ({
     getConfig: () => config,
-    resetConfig: async () => "dsh-rtk: user overrides cleared — configuration is back to the composition's values.",
+    resetConfig: async () => ({ kind: 'success', text: 'dsh-rtk: the row is back to the values it inherits from the composition.' }),
     getRuntimeStatus: () => ({ rtkAvailable: true, rtkExecutablePath: '/usr/bin/rtk' }),
     refreshRuntimeStatus: async () => ({ rtkAvailable: true, rtkExecutablePath: '/usr/bin/rtk' }),
     getMetrics: () => tracker.summary(),
     clearMetrics: () => tracker.clear(),
+    runGain: async (args) => ({ kind: 'success', text: `gain stubbed with args: ${args}` }),
     configLocation: () => 'the `dsh-rtk` namespace',
   })
   const command = createRtkCommand(baseController())
@@ -126,12 +141,21 @@ describe('/rtk command', () => {
     assert.equal(command.name, 'rtk')
   })
 
+  it('declares an input hint so `/rtk <subcommand>` is routed as a command', () => {
+    assert.equal(typeof command.input.hint, 'string')
+    for (const subcommand of ['show', 'path', 'verify', 'stats', 'gain', 'clear-stats', 'reset', 'help']) {
+      assert.match(command.input.hint, new RegExp(subcommand))
+    }
+  })
+
   it('shows configuration and status for no argument or `show`', async () => {
     for (const input of ['', '   ', 'show']) {
       const result = await command.handler({ rawInput: input })
       assert.equal(result.kind, 'success')
-      assert.match(String(result.text), /dsh-rtk: on/)
-      assert.match(String(result.text), /mode: rewrite/)
+      assert.match(String(result.text), /dsh-rtk: rewrite/)
+      assert.match(String(result.text), /compact: on/)
+      assert.match(String(result.text), /maxChars: 12000/)
+      assert.match(String(result.text), /readCompaction: none/)
       assert.match(String(result.text), /rtk binary: available/)
       assert.match(String(result.text), /history database/, 'the report must say where the usage ledger goes')
     }
@@ -139,7 +163,7 @@ describe('/rtk command', () => {
 
   it('names the resolved ledger, or says rtk decides', async () => {
     const withDefault = createRtkCommand({ ...baseController(), getHistoryDbResolution: () => ({ resolution: {} }) })
-    assert.match(String((await withDefault.handler({ rawInput: 'show' })).text), /history database\s+rtk default/)
+    assert.match(String((await withDefault.handler({ rawInput: 'show' })).text), /history database:\s+rtk default/)
 
     const withPath = createRtkCommand({
       ...baseController(),
@@ -169,8 +193,8 @@ describe('/rtk command', () => {
       }),
     })
     const text = String((await ambientWins.handler({ rawInput: 'show' })).text)
-    assert.match(text, /history database\s+\/srv\/rtk\/shared\.db/, 'the ambient path must be the one reported')
-    assert.doesNotMatch(text, /history database\s+\/var\/lib/, 'the ignored configured value must not be shown as effective')
+    assert.match(text, /history database:\s+\/srv\/rtk\/shared\.db/, 'the ambient path must be the one reported')
+    assert.doesNotMatch(text, /history database:\s+\/var\/lib/, 'the ignored configured value must not be shown as effective')
     assert.match(text, /historyDbPath is ignored/, 'the report must say why the setting is not in play')
 
     // An empty or whitespace-only ambient value is not a real override.
@@ -186,7 +210,7 @@ describe('/rtk command', () => {
   it('still reports a ledger line when the controller has no accessor', async () => {
     const result = await createRtkCommand(baseController()).handler({ rawInput: 'show' })
     assert.equal(result.kind, 'success')
-    assert.match(String(result.text), /history database\s+rtk default/)
+    assert.match(String(result.text), /history database:\s+rtk default/)
   })
 
   it('reports the verification outcome', async () => {
@@ -198,11 +222,12 @@ describe('/rtk command', () => {
   it('reports a failed verification as an error', async () => {
     const failing = createRtkCommand({
       getConfig: () => config,
-      resetConfig: async () => "dsh-rtk: user overrides cleared — configuration is back to the composition's values.",
+      resetConfig: async () => ({ kind: 'success', text: 'reset' }),
       getRuntimeStatus: () => ({ rtkAvailable: false }),
       refreshRuntimeStatus: async () => ({ rtkAvailable: false, lastError: 'spawn rtk ENOENT' }),
       getMetrics: () => tracker.summary(),
       clearMetrics: () => {},
+      runGain: async () => ({ kind: 'success', text: '' }),
       configLocation: () => 'x',
     })
     const result = await failing.handler({ rawInput: 'verify' })
@@ -212,6 +237,34 @@ describe('/rtk command', () => {
     assert.match(String(result.text), /brew install rtk/)
     assert.match(String(result.text), /cargo install --git https:\/\/github\.com\/rtk-ai\/rtk/)
     assert.match(String(result.text), /unrelated crate of the same name/, 'the crates.io name collision must be called out')
+  })
+
+  it('forwards `gain` arguments to the rtk ledger query', async () => {
+    const bare = await command.handler({ rawInput: 'gain' })
+    assert.equal(bare.kind, 'success')
+    assert.equal(String(bare.text), 'gain stubbed with args: ')
+
+    const flagged = await command.handler({ rawInput: 'gain -H' })
+    assert.equal(String(flagged.text), 'gain stubbed with args: -H')
+
+    const formatted = await command.handler({ rawInput: '  gain  -f json  ' })
+    assert.equal(String(formatted.text), 'gain stubbed with args: -f json')
+  })
+
+  it('reports a failed `gain` query as an error', async () => {
+    const failing = createRtkCommand({
+      getConfig: () => config,
+      resetConfig: async () => ({ kind: 'success', text: 'reset' }),
+      getRuntimeStatus: () => ({ rtkAvailable: true }),
+      refreshRuntimeStatus: async () => ({ rtkAvailable: true }),
+      getMetrics: () => ({ calls: 0 }),
+      clearMetrics: () => {},
+      runGain: async () => ({ kind: 'error', text: 'spawn rtk ENOENT' }),
+      configLocation: () => 'x',
+    })
+    const result = await failing.handler({ rawInput: 'gain' })
+    assert.equal(result.kind, 'error')
+    assert.match(String(result.text), /ENOENT/)
   })
 
   it('reports empty stats before anything was compacted', async () => {
@@ -237,6 +290,22 @@ describe('/rtk command', () => {
     assert.equal(tracker.summary().calls, 0)
   })
 
+  it('reports a refused reset as an error rather than a success', async () => {
+    const refusing = createRtkCommand({
+      getConfig: () => config,
+      resetConfig: async () => ({ kind: 'error', text: 'dsh-rtk: reset was refused (read-only profile)' }),
+      getRuntimeStatus: () => ({ rtkAvailable: true }),
+      refreshRuntimeStatus: async () => ({ rtkAvailable: true }),
+      getMetrics: () => tracker.summary(),
+      clearMetrics: () => {},
+      runGain: async () => ({ kind: 'success', text: '' }),
+      configLocation: () => 'x',
+    })
+    const result = await refusing.handler({ rawInput: 'reset' })
+    assert.equal(result.kind, 'error', 'a refused reset must not read as a success')
+    assert.match(String(result.text), /refused/)
+  })
+
   it('accepts a reset and prints help', async () => {
     assert.equal((await command.handler({ rawInput: 'reset' })).kind, 'success')
     const help = await command.handler({ rawInput: 'help' })
@@ -252,6 +321,6 @@ describe('/rtk command', () => {
   it('ignores case in the subcommand', async () => {
     const result = await command.handler({ rawInput: 'SHOW' })
     assert.equal(result.kind, 'success')
-    assert.match(String(result.text), /dsh-rtk: on/)
+    assert.match(String(result.text), /dsh-rtk: rewrite/)
   })
 })

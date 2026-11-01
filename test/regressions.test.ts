@@ -34,13 +34,7 @@ describe('D1: read compaction must not inflate, banner included', () => {
     lines.push('  // a removable comment')
     const source = lines.join('\n')
 
-    const config = normalizeConfig({
-      outputCompaction: {
-        readCompaction: { enabled: true },
-        sourceCodeFilteringEnabled: true,
-        sourceCodeFiltering: 'minimal',
-      },
-    })
+    const config = normalizeConfig({ readCompaction: 'minimal' })
 
     const outcome = compactToolResult({ toolName: 'read', args: { path: 'src/a.ts' }, content: [{ type: 'text', text: source }] }, config)
     if (outcome.changed) {
@@ -64,13 +58,7 @@ describe('D1: read compaction must not inflate, banner included', () => {
     for (let index = 0; index < 40; index += 1) lines.push(`  // removable comment number ${index}`)
     const source = lines.join('\n')
 
-    const config = normalizeConfig({
-      outputCompaction: {
-        readCompaction: { enabled: true },
-        sourceCodeFilteringEnabled: true,
-        sourceCodeFiltering: 'minimal',
-      },
-    })
+    const config = normalizeConfig({ readCompaction: 'minimal' })
 
     const outcome = compactToolResult({ toolName: 'read', args: { path: 'src/b.ts' }, content: [{ type: 'text', text: source }] }, config)
     assert.equal(outcome.changed, true, 'a result that really shrinks must still be compacted')

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img">
+  <title>dsh-rtk</title>
+  <rect x="3" y="3" width="58" height="58" rx="15" fill="#0f172a"/>
+  <path d="M15 21l10 11-10 11" fill="none" stroke="#34d399" stroke-width="5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M31 43h18" fill="none" stroke="#e2e8f0" stroke-width="5" stroke-linecap="round"/>
+  <path d="M31 21h10" fill="none" stroke="#94a3b8" stroke-width="5" stroke-linecap="round"/>
+</svg>
