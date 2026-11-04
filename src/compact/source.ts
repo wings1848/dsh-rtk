@@ -1,4 +1,4 @@
-import type { SourceCodeFilteringLevel } from '../config.js'
+import type { ReadCompaction } from '../config.js'
 
 /** A language whose comment syntax this module knows. */
 export type Language = 'javascript' | 'python' | 'rust' | 'go' | 'java' | 'c' | 'shell' | 'ruby' | 'unknown'
@@ -58,58 +58,6 @@ export function detectLanguage(filePath: string): Language {
   const lastDot = filePath.lastIndexOf('.')
   if (lastDot === -1) return 'unknown'
   return LANGUAGE_EXTENSIONS[filePath.slice(lastDot).toLowerCase()] ?? 'unknown'
-}
-
-/**
- * Keep the most informative `maxLines` lines of a source read.
- *
- * The first half of the budget is kept verbatim, after which only structural
- * lines survive — signatures, imports, and lone braces — with a marker where
- * body lines were dropped. This preserves the shape of the file (what is
- * defined where) rather than an arbitrary prefix, which is what makes the
- * result still usable for orientation.
- *
- * @param content - file text.
- * @param maxLines - line budget.
- * @returns the reduced text.
- */
-export function smartTruncate(content: string, maxLines: number): string {
-  const lines = content.split('\n')
-  if (lines.length <= maxLines) return content
-
-  const result: string[] = []
-  let keptLines = 0
-  let skippedSection = false
-
-  for (const line of lines) {
-    const trimmed = line.trim()
-    const isImportant =
-      SIGNATURE_PATTERN.test(trimmed) ||
-      IMPORT_PATTERN.test(trimmed) ||
-      trimmed.startsWith('pub ') ||
-      trimmed.startsWith('export ') ||
-      trimmed === '}' ||
-      trimmed === '{'
-
-    if (isImportant || keptLines < maxLines / 2) {
-      if (skippedSection) {
-        result.push(`    // ... ${lines.length - keptLines} lines omitted`)
-        skippedSection = false
-      }
-      result.push(line)
-      keptLines += 1
-    } else {
-      skippedSection = true
-    }
-
-    if (keptLines >= maxLines - 1) break
-  }
-
-  if (skippedSection || keptLines < lines.length) {
-    result.push(`// ... ${lines.length - keptLines} more lines (total: ${lines.length})`)
-  }
-
-  return result.join('\n')
 }
 
 /**
@@ -229,16 +177,12 @@ function filterAggressive(content: string, language: Language): string {
   return result.join('\n')
 }
 
-/** Apply the configured source-filtering level. */
-export function filterSourceCode(content: string, language: Language, level: SourceCodeFilteringLevel): string {
+/** Apply one of the filtering levels; the budget-only levels never reach here. */
+export function filterSourceCode(content: string, language: Language, level: Exclude<ReadCompaction, 'none' | 'budget'>): string {
   switch (level) {
-    case 'none':
-      return content
     case 'minimal':
       return filterMinimal(content, language)
     case 'aggressive':
       return filterAggressive(content, language)
-    default:
-      return content
   }
 }

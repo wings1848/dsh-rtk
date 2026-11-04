@@ -1,21 +1,24 @@
 import { homedir } from 'node:os'
 import { resolve } from 'node:path'
 
-import type { OutputCompactionConfig, RtkConfig } from '../config.js'
+import { COMPACTED_TOOLS, type RtkConfig } from '../config.js'
 import { aggregateLinterOutput } from './linter.js'
 import { filterBuildOutput } from './build.js'
 import { aggregateTestOutput } from './test-output.js'
 import { compactGitOutput } from './git.js'
 import { groupSearchResults } from './search.js'
-import { detectLanguage, filterSourceCode, smartTruncate } from './source.js'
+import { detectLanguage, filterSourceCode } from './source.js'
 import { NO_OUTPUT_PLACEHOLDER, parseBashResult, renderBashResult } from './dsh-result.js'
 import { countLines, stripAnsi, truncate } from './text.js'
 
 /** Techniques whose effect cannot be undone by re-reading a smaller range. */
-const LOSSY_TECHNIQUES = ['build', 'test', 'git', 'linter', 'search', 'truncate', 'smart-truncate', 'source:'] as const
+const LOSSY_TECHNIQUES = ['build', 'test', 'git', 'linter', 'search', 'truncate', 'source:'] as const
 
 /** Reads at or below this many lines are always left exact. */
 const READ_EXACT_LINE_THRESHOLD = 80
+
+/** Tools whose results pass through the pipeline. */
+const COMPACTABLE_TOOLS = new Set(COMPACTED_TOOLS)
 
 /** Banner prefixed to a `read` result that lost information. */
 export const READ_COMPACTION_BANNER_PREFIX = '[rtk compacted output:'
@@ -44,6 +47,23 @@ export interface CompactionOutcome {
   content?: unknown[]
   techniques: string[]
   metadata?: CompactionMetadata
+}
+
+/** The resolved switches one pass needs; every other technique is always on. */
+interface CompactionSettings {
+  maxChars: number
+  readCompaction: RtkConfig['readCompaction']
+  /** False when the harness's spill policy owns the final bound. */
+  truncate: boolean
+}
+
+/** Options layered on top of the configuration. */
+export interface CompactionOptions {
+  /**
+   * Set when `dsh-spill-policy` is mounted: it truncates recoverably (full
+   * output on disk), so this plugin must not pre-empt it with a lossy bound.
+   */
+  deferToHarnessSpill?: boolean
 }
 
 interface TextTransform {
@@ -77,8 +97,8 @@ function applyNullable(state: TextTransform, result: string | null, technique: s
   state.techniques.push(technique)
 }
 
-function applyAnsi(state: TextTransform, compaction: OutputCompactionConfig): void {
-  if (!compaction.stripAnsi) return
+/** Strip terminal escape sequences; always on, and a no-op without ESC bytes. */
+function applyAnsi(state: TextTransform): void {
   const stripped = stripAnsi(state.text)
   if (stripped !== state.text) {
     state.text = stripped
@@ -94,21 +114,21 @@ function applyAnsi(state: TextTransform, compaction: OutputCompactionConfig): vo
  * what the reader acts on. The trailing markers are re-attached verbatim, and
  * a final budget check truncates the bodies while never cutting a marker.
  */
-function compactBashText(text: string, command: string | undefined, compaction: OutputCompactionConfig): TextTransform {
+function compactBashText(text: string, command: string | undefined, settings: CompactionSettings): TextTransform {
   const parts = parseBashResult(text)
   if (parts.empty) return { text, techniques: [] }
 
   const state: TextTransform = { text: parts.stdout, techniques: [] }
-  applyAnsi(state, compaction)
+  applyAnsi(state)
 
-  if (compaction.filterBuildOutput) applyNullable(state, filterBuildOutput(state.text, command), 'build')
-  if (compaction.aggregateTestOutput) applyNullable(state, aggregateTestOutput(state.text, command), 'test')
-  if (compaction.compactGitOutput) applyNullable(state, compactGitOutput(state.text, command), 'git')
-  if (compaction.aggregateLinterOutput) applyNullable(state, aggregateLinterOutput(state.text, command), 'linter')
+  applyNullable(state, filterBuildOutput(state.text, command), 'build')
+  applyNullable(state, aggregateTestOutput(state.text, command), 'test')
+  applyNullable(state, compactGitOutput(state.text, command), 'git')
+  applyNullable(state, aggregateLinterOutput(state.text, command), 'linter')
 
   let stdout = state.text
   let stderr = parts.stderr
-  if (stderr !== undefined && compaction.stripAnsi) stderr = stripAnsi(stderr)
+  if (stderr !== undefined) stderr = stripAnsi(stderr)
 
   const render = (): string =>
     renderBashResult({
@@ -119,9 +139,9 @@ function compactBashText(text: string, command: string | undefined, compaction: 
     })
 
   let rendered = render()
-  if (compaction.truncate.enabled && rendered.length > compaction.truncate.maxChars) {
+  if (settings.truncate && rendered.length > settings.maxChars) {
     const markerOverhead = renderBashResult({ empty: false, stdout: '', markers: parts.markers }).length
-    const budget = Math.max(1, compaction.truncate.maxChars - markerOverhead - 8)
+    const budget = Math.max(1, settings.maxChars - markerOverhead - 8)
     // stderr keeps the smaller share: it is usually short, and when it is not,
     // its head is still the diagnostic while its tail is usually a stack dump.
     const stderrBudget = stderr === undefined ? 0 : Math.min(stderr.length, Math.floor(budget * 0.4))
@@ -137,20 +157,19 @@ function compactBashText(text: string, command: string | undefined, compaction: 
   return { text: rendered, techniques: state.techniques }
 }
 
-/**
- * Whether a `read` result must stay byte-exact.
- *
- * Three cases: the caller asked for a narrow range (the tool already bounded
- * it, and the caller will edit against what it sees), the file is short enough
- * that filtering saves nothing worth the risk, or the path lives under a skill
- * directory — skills are instructions the agent follows verbatim.
- */
-function shouldPreserveExactRead(text: string, args: Record<string, unknown>, compaction: OutputCompactionConfig): boolean {
-  if (!compaction.readCompaction.enabled) return true
+/** Whether a `read` result must stay byte-exact. */
+function shouldPreserveExactRead(
+  text: string,
+  args: Record<string, unknown>,
+  settings: CompactionSettings,
+): boolean {
+  if (settings.readCompaction === 'none') return true
   if (args.offset !== undefined || args.limit !== undefined) return true
   if (countLines(text) <= READ_EXACT_LINE_THRESHOLD) return true
 
-  if (compaction.preserveExactSkillReads && typeof args.path === 'string') {
+  // Skills are instructions the agent follows verbatim, so a read under one of
+  // their directories is never filtered, whatever the configured strength is.
+  if (typeof args.path === 'string') {
     const target = resolve(args.path)
     const roots = [resolve(homedir(), '.agents', 'skills'), resolve(homedir(), '.dsh', 'skills')]
     let cursor = process.cwd()
@@ -166,35 +185,28 @@ function shouldPreserveExactRead(text: string, args: Record<string, unknown>, co
   return false
 }
 
-function compactReadText(
-  text: string,
-  args: Record<string, unknown>,
-  compaction: OutputCompactionConfig,
-): TextTransform {
-  if (shouldPreserveExactRead(text, args, compaction)) return { text, techniques: [] }
+function compactReadText(text: string, args: Record<string, unknown>, settings: CompactionSettings): TextTransform {
+  if (shouldPreserveExactRead(text, args, settings)) return { text, techniques: [] }
 
   const state: TextTransform = { text, techniques: [] }
-  applyAnsi(state, compaction)
+  applyAnsi(state)
 
   const filePath = typeof args.path === 'string' ? args.path : ''
   const language = detectLanguage(filePath)
+  const level = settings.readCompaction
 
-  if (compaction.sourceCodeFilteringEnabled && compaction.sourceCodeFiltering !== 'none') {
-    applyNullable(state, filterSourceCode(state.text, language, compaction.sourceCodeFiltering), `source:${compaction.sourceCodeFiltering}`)
+  if (level === 'minimal' || level === 'aggressive') {
+    applyNullable(state, filterSourceCode(state.text, language, level), `source:${level}`)
   }
 
-  if (compaction.smartTruncate.enabled && countLines(state.text) > compaction.smartTruncate.maxLines) {
-    applyNullable(state, smartTruncate(state.text, compaction.smartTruncate.maxLines), 'smart-truncate')
-  }
-
-  if (compaction.truncate.enabled && state.text.length > compaction.truncate.maxChars) {
-    applyNullable(state, truncate(state.text, compaction.truncate.maxChars), 'truncate')
+  if (settings.truncate && state.text.length > settings.maxChars) {
+    applyNullable(state, truncate(state.text, settings.maxChars), 'truncate')
   }
 
   if (state.techniques.length === 0) return { text, techniques: [] }
 
-  // The banner is part of the returned result, so the size guard must weigh it.
-  // Filtering one comment line out of a short file saves less than the banner
+  // The banner is part of the returned result, so the size guard must weigh it:
+  // filtering one comment line out of a short file saves less than the banner
   // costs, and without this the result would come back longer than the text it
   // replaced — the exact invariant the guard exists to hold.
   const banner = `${READ_COMPACTION_BANNER_PREFIX} ${state.techniques.join(', ')}]`
@@ -203,18 +215,39 @@ function compactReadText(
   return { text: rendered, techniques: state.techniques }
 }
 
-function compactGrepText(text: string, compaction: OutputCompactionConfig): TextTransform {
+function compactGrepText(text: string, settings: CompactionSettings): TextTransform {
   const state: TextTransform = { text, techniques: [] }
-  applyAnsi(state, compaction)
+  applyAnsi(state)
 
-  if (compaction.groupSearchOutput) applyNullable(state, groupSearchResults(state.text), 'search')
+  applyNullable(state, groupSearchResults(state.text), 'search')
 
-  if (compaction.truncate.enabled && state.text.length > compaction.truncate.maxChars) {
-    applyNullable(state, truncate(state.text, compaction.truncate.maxChars), 'truncate')
+  if (settings.truncate && state.text.length > settings.maxChars) {
+    applyNullable(state, truncate(state.text, settings.maxChars), 'truncate')
   }
 
   if (state.text.length >= text.length) return { text, techniques: [] }
   return state
+}
+
+/**
+ * Whether a result body is one JSON document.
+ *
+ * dsh-ops renders `ops_grep` (and its other Rust tools) as a single
+ * `JSON.stringify` line. The grep summarizer recognises `path:line:text`
+ * lines and would happily mis-read that one line as a match — every JSON
+ * document contains a colon, so the shape test passes and the output would be
+ * replaced by a bogus "1 matches in 1 files" summary. Structured bodies are
+ * therefore left byte-exact.
+ */
+function isStructuredJson(text: string): boolean {
+  const trimmed = text.trimStart()
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return false
+  try {
+    JSON.parse(trimmed)
+    return true
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -223,18 +256,23 @@ function compactGrepText(text: string, compaction: OutputCompactionConfig): Text
  * Returns `changed: false` whenever the result would not actually shrink, so a
  * caller can treat "no outcome" and "no improvement" identically and the model
  * never pays for a rewrite that saved nothing.
- *
- * @param input - the tool name, its parsed arguments, and the content blocks.
- * @param config - the resolved plugin configuration.
- * @returns the replacement content and the techniques that fired.
  */
-export function compactToolResult(input: CompactionInput, config: RtkConfig): CompactionOutcome {
-  const compaction = config.outputCompaction
-  if (!config.enabled || !compaction.enabled) return { changed: false, techniques: [] }
-  if (!config.compactedTools.includes(input.toolName)) return { changed: false, techniques: [] }
+export function compactToolResult(
+  input: CompactionInput,
+  config: RtkConfig,
+  options: CompactionOptions = {},
+): CompactionOutcome {
+  if (config.mode === 'off' || !config.compact) return { changed: false, techniques: [] }
+  if (!COMPACTABLE_TOOLS.has(input.toolName)) return { changed: false, techniques: [] }
 
   const sourceContent = asArray(input.content)
   if (sourceContent.length === 0) return { changed: false, techniques: [] }
+
+  const settings: CompactionSettings = {
+    maxChars: config.maxChars,
+    readCompaction: config.readCompaction,
+    truncate: options.deferToHarnessSpill !== true,
+  }
 
   const args = asRecord(input.args)
   const command = typeof args.command === 'string' ? args.command : undefined
@@ -247,9 +285,11 @@ export function compactToolResult(input: CompactionInput, config: RtkConfig): Co
     if (!isTextBlock(block)) return block
 
     let transformed: TextTransform = { text: block.text, techniques: [] }
-    if (input.toolName === 'bash') transformed = compactBashText(block.text, command, compaction)
-    else if (input.toolName === 'read') transformed = compactReadText(block.text, args, compaction)
-    else if (input.toolName === 'grep') transformed = compactGrepText(block.text, compaction)
+    if (input.toolName === 'bash' || input.toolName === 'ops_bash') transformed = compactBashText(block.text, command, settings)
+    else if (input.toolName === 'read') transformed = compactReadText(block.text, args, settings)
+    else if (input.toolName === 'grep' || input.toolName === 'ops_grep') {
+      transformed = isStructuredJson(block.text) ? { text: block.text, techniques: [] } : compactGrepText(block.text, settings)
+    }
 
     for (const technique of transformed.techniques) techniques.add(technique)
     originalChunks.push(block.text)

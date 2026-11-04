@@ -8,9 +8,9 @@
 [![Node](https://img.shields.io/badge/node-%3E%3D22.18.0-brightgreen.svg)](https://nodejs.org)
 [![English](https://img.shields.io/badge/README-English-blue)](https://github.com/wings1848/dsh-rtk/blob/main/README.md)
 
-给 [DeepSeek Harness](https://github.com/deepseek-ai/dsh) 用的 RTK 命令重写 + 工具输出压缩插件。
+给 [DeepSeek Harness](https://github.com/deepseek-ai/dsh)（下称 DSH）用的 RTK 命令重写与工具输出压缩插件。
 
-`dsh-rtk` 会在 `bash` 命令执行前把它改写成等价的 [rtk](https://github.com/rtk-ai/rtk) 命令，并在工具输出进入模型上下文前压缩它。它是 [`pi-rtk-optimizer`](https://github.com/MasuRii/pi-rtk-optimizer) 在 harness 插件模型上的移植。
+`dsh-rtk` 在命令派发前把它改写成语义等价的 [rtk](https://github.com/rtk-ai/rtk) 命令，并在工具输出进入模型上下文之前压缩它。支持 `bash`、`pwsh`、`ops_bash` 三类 shell 工具的命令改写，以及 `bash`、`read`、`grep`、`ops_bash`、`ops_grep` 五类工具结果的压缩。在 Web 宿主上，它还提供行配置页与 rtk 收益面板。
 
 ```
 模型发出：  git status
@@ -20,21 +20,30 @@
               src/a.ts
 ```
 
-![How dsh-rtk works](https://raw.githubusercontent.com/wings1848/dsh-rtk/main/docs/assets/how-it-works.svg)
+![dsh-rtk 工作原理](docs/assets/how-it-works.svg)
+
+> **致谢上游。** 本仓库的重构起点是上游项目
+> [wings1848/dsh-rtk](https://github.com/wings1848/dsh-rtk)，插件标识、包名
+> `@wingsbutterfly/dsh-rtk` 与 `dsh.bundle` 挂载方式都沿用自那里；而它的设计又移植自
+> [`pi-rtk-optimizer`](https://github.com/MasuRii/pi-rtk-optimizer)，即把同一套
+> rtk 改写/压缩策略搬到 DSH 的插件模型上。本仓库后续的配置模型收敛、客户端配置页与
+> 收益面板、交付元数据与合规修复均建立在上述工作之上，感谢原作者的开源。
 
 ## 功能
 
-### 命令重写
+### 命令改写
 
-- 有 rtk 等价命令的调用会在派发前被改写；rtk 不支持的命令原样执行。
-- **rtk 始终是唯一事实来源。** 插件不带自己的重写表，而是通过 `rtk rewrite` 询问已安装的二进制，所以支持范围跟随你装的 rtk 版本。
-- **`rewrite` 与 `suggest` 两种模式。** `rewrite` 替换命令；`suggest` 原样执行并报告本可使用的等价命令。
-- **运行时守卫。** `guardWhenRtkMissing`（默认开）下，无法确认 rtk 可用的调用会执行原命令——缺少优化器永远不会挡住工作。
-- 被改写的命令不会把 rtk 的使用历史写进工作目录：默认沿用 rtk 自己的用户级库，也可以用 `historyDbPath` 指定确切位置。
+- 有 rtk 等价命令的调用会在派发前被改写；rtk 不认识的原样执行。
+- **rtk 始终是唯一事实来源。** 插件自身不带改写表，而是通过 `rtk rewrite` 询问已安装的二进制，因此支持范围跟随你装的 rtk 版本。
+- **三种模式。** `off` 全关；`rewrite` 直接替换命令；`suggest` 原样执行、只报告本可使用的等价命令。
+- **运行时守卫。** 无法确认 rtk 可用时按原命令执行——缺少优化器永远不会挡住工作。
+- 被改写的命令默认**不注入** `RTK_DB_PATH`，rtk 写它自己的用户级库（终端里 `rtk gain` 读的同一个，重启不丢）；`historyDbPath` 可以把台账钉到指定位置。相对路径与目录会被拒绝——它们会让 rtk 静默丢账或把库写进当前工作目录。
+- 子进程环境做脱敏：`*_KEY`、`*_PASSWORD`、`*_SECRET`、`*_TOKEN` 与 `DSH_*` 一律不传给 `rtk rewrite` / `rtk gain` 等外呼进程。
+- 插件页显示真实的名称、描述与图标：`locale/en.json`、`locale/zh.json` 与原创 `icon.svg` 随包发布，不激活插件也会被读取。
 
 ### 输出压缩
 
-针对 `bash`、`read`、`grep` 结果的多阶段管线：
+对工具结果跑一条多阶段管线：
 
 | 阶段 | 作用 |
 |---|---|
@@ -42,32 +51,35 @@
 | 构建过滤 | 提取编译错误与警告，丢弃进度噪音 |
 | 测试聚合 | 折叠为 通过/失败/跳过 计数加失败摘录 |
 | Git 压缩 | 归纳 `git status`、`git diff`、`git log` |
-| Linter 聚合 | 统计问题数并按规则与文件排名 |
-| 搜索分组 | 按文件归组 `grep` 风格匹配 |
-| 源码过滤 | `none` / `minimal` / `aggressive` 注释与空白处理（默认关） |
-| 智能截断 | 丢行时保留签名与 import（默认关） |
-| 硬截断 | 最终字符预算 |
+| Linter 聚合 | 统计问题数并按规则与文件排序 |
+| 搜索分组 | 把 `grep` 风格匹配按文件归组 |
+| read 压缩 | `readCompaction: minimal` 删普通注释；`aggressive` 只留 import 与签名（默认关） |
+| 硬截断 | 最后兜底的字符预算 |
 
-有两条性质是**硬性不变量**：
+两条性质是**硬约束**：
 
-- **harness 的结果契约必须存活。** `bash` 结果以状态标记结尾——`[exit code: N]`、`[stderr]`、`[timed out after …]`、`[sandbox: …]`。压缩会先把这些标记摘出来，重写正文后再原样接回；模型被要求在每次调用后检查 `[exit code: N]`，Web UI 也解析同一行来画退出状态。
-
-- **压缩绝不把结果变大。** 如果某个技术不能真正缩短文本，就保留原文并且不上报。
+- **harness 的结果契约必须存活。** 结果尾部的状态标记——`[exit code: N]`、`[stderr]`、`[timed out after …]`、`[sandbox: …]`——会先被摘出，重写正文后原样接回，并保证永远在最后一行。模型被要求每次调用后检查 `[exit code: N]`，Web UI 也解析同一行来画退出状态。
+- **压缩绝不把结果变大。** 某个技术若不能真正缩短文本，就保留原文并且不上报收益。
 
 ### 超大输出归 harness 管
 
-`dsh-spill-policy` 挂载时，它会把完整结果落盘、上下文里只留头尾预览——这种截断是**可恢复的**。而本插件的硬截断不可恢复，且**跑在前面**：默认 12000 字符的阈值远低于 spill 的 50000 字节阈值，于是 spill 根本看不到大结果，那个本可以让读者看到剩余内容的落盘文件也就永远不会产生。
+挂载 `dsh-spill-policy` 时，它会把完整结果落盘、上下文里只留头尾预览，这种截断是**可恢复的**。本插件的硬截断不可恢复，而且跑在前面：默认 12000 字符的阈值远低于 spill 的 50000 字节阈值，spill 根本见不到大结果，那份"让读者看剩下的部分"的落盘文件也就永远不会生成。
 
-`deferToHarnessSpill` 开启时（默认），只要 spill 服务在场，插件就关掉自己的截断，让失控命令的输出保持可读。设为 `false` 则无论 spill 是否挂载都保留插件自己的上限。
-
+因此只要 spill 服务在场，插件就关掉自己的截断，让失控命令的输出保持可读。是否让位只看服务在不在——没有开关。
 
 ### 会话统计
 
-`/rtk stats` 报告本次会话省下多少字符，按工具与按技术两个维度。
+`/rtk stats` 报告本次会话里压缩省下多少字符，按工具和按技术分别统计。
+
+### 行配置页与收益面板
+
+- Web 的 **插件 → 本包 → 行 `rtk` → 配置** 就是插件自己的设置页：五个日常字段可读可改，带「已覆盖 / 恢复默认」与保存中禁用；写入走宿主设置服务，也就是 `/rtk reset` 清的那一层。
+- 表单下的 **收益（Gain）** 面板画出 rtk 实际省下的量：20 格效率条、原始输出 / rtk 处理后 / 省下（及占比）、命令数与平均耗时，可在 **按天** 与 **按命令** 之间切换，并按工作区与时间窗切片。
+- 数据由宿主执行 `rtk gain -d -f json` 取得，经带鉴权的精确 Fetch 路由 `POST /api/dsh-rtk/gain` 送到浏览器；没有 Web connection 的部署会明确显示「台账不可用」，而不是坏掉的页面。
 
 ## 安装
 
-**支持的宿主**：dsh 0.1.5、0.1.7、0.2.0 三代，每代都实测过，证据见 [`docs/verification.md`](docs/verification.md)。Node >= 22.18。
+**支持的宿主：** dsh 0.1.5、0.1.7、0.2.0、0.2.1（逐条实测，证据见 [`docs/verification.md`](docs/verification.md)）。Node ≥ 22.18。
 
 ### 0. 前置：先装 rtk 二进制
 
@@ -92,162 +104,150 @@ rtk --version
 
 会话里也可以用 `/rtk verify` 查同一件事，失败时它会直接打印上面这些安装方式。
 
-### 1. 安装包
+插件还会**自动探测** `rtkExecutable`（见[配置](#配置)），所以「装好了但不在 harness 的 `PATH` 上」在 Windows 上也能被找出来。
+
+### 1. 安装插件包
 
 ```bash
 dsh plugin --profile web add @wingsbutterfly/dsh-rtk
 ```
 
-> **这一步只装包，不生效。** 插件管理器会显示「已安装，未生效」，这是预期行为——`dsh-rtk` 刻意不声明 `dsh.bundle`（那样会被自动挂到 host 平面、对所有会话生效），而是留到第 2 步按 preset 精细启用。
+插件声明了 `dsh.bundle`（见 [`cordis.patch.yml`](cordis.patch.yml)），所以这条命令**既安装又挂载**：插件管理器把包名追加进 `dsh.profile.bundles`，bundle 层再插入 host 平面的行
 
-想从本地检出直接用？软链到组合能解析裸模块名的位置：
+```yaml
+- id: rtk
+  name: '@wingsbutterfly/dsh-rtk'
+```
+
+装完需重启宿主——profile 行只在启动时挂载。
+
+> **作用域：host 平面行覆盖该 profile 下的所有会话。** 该行每个宿主进程只实例化一次，它挂的 `tools/execute` / `tools/post-execute` 监听是进程级的：命令改写与输出压缩对该 profile 里的每个 agent、preset、子智能体都生效。bundle patch 表达不了"按 preset 选择性开启"——patch 只能往根列表追加行，loader 也无法扩展 `preset-*.config.plugins`。要收窄就用行自己的开关：`mode: off` 全关，`mode: suggest` 只报告不改写。
+
+**运行期验证过的现象**（宿主 0.2.1-rc.2，实测记录见 `docs/verification.md`）：模型发出的 `ls` 实际执行 `rtk ls`，`cat` 实际执行 `rtk read`，台账位置跟随 rtk 自己的库；插件页显示本地化的标题与图标；行配置页 5 个控件可读可改；`POST /api/dsh-rtk/gain` 在带 cookie 时返回真实台账、无 cookie 时 401。
+
+### 只想按 preset 开
+
+不希望改写覆盖全 profile 时，别走 bundle 通道：把包装成普通依赖，手工把那行加进目标 preset 的插件列表，并让包名不出现在 `dsh.profile.bundles` 里（CLI 已经加过就删掉）。**不要两处都挂。** 此时插件页会显示"已安装、未激活"，属预期，也是这条路径唯一不算问题的状态。
+
+从源码目录直接跑？把检出目录链到组合能解析到的位置：
 
 ```bash
 mkdir -p ~/.dsh/node_modules/@wingsbutterfly
 ln -s /path/to/dsh-rtk ~/.dsh/node_modules/@wingsbutterfly/dsh-rtk
 ```
 
-### 2. 给一个 agent preset 加一行
+### 机器相关配置
 
-`dsh-rtk` 是 **agent 平面**的行：它只往工具管线里注册监听器、不发布任何服务，所以不需要 `isolate` realm。把它加到你希望被优化的 preset：
+包内 patch 只带可移植的默认值。像 `rtkExecutable` 这种绝对路径，请写在 profile 自己的 `cordis.patch.yml` 里，用**非 insert** 条目覆盖。注意必须重述整个 `config:` 块——patch 对行的 config 是整体替换，不做合并：
 
 ```yaml
 - id: rtk
-  name: '@wingsbutterfly/dsh-rtk'
   config:
-    enabled: true
     mode: rewrite
+    rtkExecutable: /opt/rtk/bin/rtk
 ```
 
-不想动现有 preset，就复制一个再加行：
+### 从手工挂载升级
 
-```
-# 让 cordis preset 的 agent 执行
-agentPresets.copy('standard', 'rtk', 'RTK 优化')
-```
-
-这一行挂在 **host 平面**同样有效（写进 `~/.dsh/cordis.patch.yml`），会覆盖该部署下的所有会话——但需要重启宿主，而且在 dsh 0.1.5 上，host 行与 preset 行会同时想要同一个进程级 `dsh-rtk` settings 命名空间（0.1.7 按行 id 区分，已无此冲突）。**两个平面只选一个。**
-
-**插件管理器显示「已安装，未生效」？** 那是当前 preset 还没有那一行：包只是普通依赖（未声明 `dsh.bundle` 元数据），只有 preset 行（或 host patch 行）才让它生效。
+如果 profile 的 `cordis.patch.yml` 里还留着当年手写的 `- insert:` 行，再装 bundle 会把同一行挂两次。删掉手工 insert 块，只保留上面那种非 insert 覆盖。
 
 ## 配置
 
-所有字段可选，下列为默认值。
+所有字段可选，下例即默认值。
 
 ```yaml
 - id: rtk
   name: '@wingsbutterfly/dsh-rtk'
   config:
-    enabled: true                    # 总开关
-    mode: rewrite                    # rewrite | suggest
-    guardWhenRtkMissing: true        # rtk 不可用时执行原命令
-    showRewriteNotifications: false  # 在结果末尾附加一行改写说明
-    rtkExecutable: rtk               # 名字或绝对路径
-    historyDbPath: ''                # '' = 用 rtk 自己的库；也可填绝对路径、~/ 路径，或 isolated
-    rewriteTimeoutMs: 3000           # 单次 `rtk rewrite` 的截止时间
-    compactedTools: [bash, read, grep]
-    outputCompaction:
-      enabled: true
-      stripAnsi: true
-      readCompaction:
-        enabled: false               # 有损 read 压缩；默认关，保证读到的代码是精确的
-      sourceCodeFilteringEnabled: false
-      preserveExactSkillReads: false
-      sourceCodeFiltering: none      # none | minimal | aggressive
-      aggregateTestOutput: true
-      filterBuildOutput: true
-      compactGitOutput: true
-      aggregateLinterOutput: true
-      groupSearchOutput: true
-      trackSavings: true
-      deferToHarnessSpill: true      # 把超大输出让给 harness 的 spill 策略
-      smartTruncate:
-        enabled: false
-        maxLines: 220                # 40–4000
-      truncate:
-        enabled: true
-        maxChars: 12000              # 1000–200000
+    mode: rewrite                    # off | rewrite | suggest
+    compact: true                    # 是否压缩工具输出
+    maxChars: 12000                  # 字符预算（1000–200000）
+    readCompaction: none             # none | budget | minimal | aggressive
+    rtkExecutable: rtk               # 名字或绝对路径，空串表示自动探测
+    historyDbPath: ''                # '' = rtk 自己的库；或绝对/~ 路径，或 `isolated`
 ```
 
-配置也能在 harness 设置文档里在线编辑、即时生效、无需重启。入口随宿主版本不同：dsh 0.1.7+ 上，这一行会成为设置文档里自己的条目（用组合行的 id 命名，上例即 `rtk`），每个字段都可编辑；dsh 0.1.5 上则是 `dsh-rtk` 命名空间。无论哪一代，组合的 `config:` 块提供基础层，设置文档在其上叠加用户层——`/rtk path` 会报告当前插件能看到的入口。遇到不认识的 settings 服务，插件只失去在线编辑能力、降级为「仅组合配置」继续工作，不会整个挂掉。
+> **`historyDbPath` 是配置收敛后保留的第六个字段。** 它决定 rtk 把使用台账写到哪里：空串（默认）不注入任何东西，rtk 写它自己的用户级库；填绝对路径或 `~/` 路径就钉在那里；`isolated` 回到 `<tmpdir>/dsh-rtk/history.db`。设置页只画五个日常字段，这一项属于布局决策，写在组合或设置文档里——填错会被拒绝并给出 warning，不会静默改写。
 
-> **行放在哪，决定设置可不可写（dsh 0.1.7+）。** home patch（`~/.dsh/cordis.patch.yml`）里的行是**只读**的：服务会拒绝被低层覆盖的写，`/rtk reset` 也会如实报告这个拒绝。想保留在线调参，就把行放进 profile 的组合里。
+> **从旧 schema 升级。** 废弃字段会被迁移而不是静默忽略：`enabled: false` → `mode: off`，`outputCompaction.enabled` → `compact`，`truncate.maxChars` → `maxChars`，三个 read 压缩字段收敛成 `readCompaction`（关 → `none`；开启且 `minimal`/`aggressive` → 对应档位；开启但不过滤 → `budget`）。其余被删的开关固定为原先的默认行为；spill 让位改为"看服务在不在"，不再可配。迁移只看"新字段是否仍是 schema 默认值"，因此用户恰好把新字段设成默认值时无法与"未设置"区分——这是迁移语义本身的边界。
 
-> **为什么 `readCompaction` 默认关。** 过滤或截断 `read` 结果，可能让模型拿到的文本与文件不再一致，编辑就会失配。默认开启的每一项，要么对它归纳的正文是无损的，要么只作用于整个形态都会被替换掉的输出。
+`rtkExecutable` 会**自动探测**：加载时先在 PATH 里查，Windows 上还会查 WinGet、cargo、Scoop 的常见安装目录（每个候选都用 `--version` 验一遍），找到就把绝对路径写回该设置；都没找到就写空串，即自动状态。手填过的值永不被覆盖。
 
-> **rtk 的使用台账写在哪，为什么默认「不插手」。** 只有在 `historyDbPath` 指定了位置时，被改写的命令才会带 `RTK_DB_PATH`。默认空值表示完全不注入，交给 rtk 自己按平台写默认库（Linux 上是 `~/.local/share/rtk/history.db`，并遵循 `XDG_DATA_HOME`）——也就是你终端里 `rtk gain` 读的同一个库，重启也不会清零。可填的值：
->
-> | `historyDbPath` | 效果 |
-> |---|---|
-> | `''`（默认）或 `default` | 不注入，由 rtk 决定 |
-> | `/var/lib/dsh-rtk/history.db` | 原样使用该绝对路径 |
-> | `~/.local/share/rtk/history.db` | 开头的 `~` 展开成你的家目录 |
-> | `isolated` | `<tmpdir>/dsh-rtk/history.db`——0.1.3 之前的老行为：不落家目录，但重启清零、`rtk gain` 看不到 |
->
-> 有三类值会被**故意拒绝**，因为 rtk 在这几种情况下会「无声失败」：
->
-> - **相对路径**——拿去和当前目录拼，会把台账写进你碰巧正在跑的项目里。
-> - **目录**（`~`、`~/`、`/var/lib/rtk/`）——rtk 把 `RTK_DB_PATH` 当成数据库**文件**。给它一个目录，它退出码 0、什么都不写，直到你跑 `rtk gain` 才报 `unable to open database file`，整个台账无声丢掉。
-> - **另一个平台的路径写法**——`C:\data\history.db` 在 Linux/macOS 上只是一个普通相对文件名，rtk 会把它建在当前工作目录里。
->
-> 拒绝只损失「注入」这一步，命令照样按改写后的形式执行，`/rtk show` 的 `history database` 行会说明原因。环境里已有的 `RTK_DB_PATH` 永远优先，且该行会直接显示它，让你看到实际生效的是哪个库。
+配置也可以在 DSH 的设置文档里实时修改，改完无需重启。出现位置随宿主代际不同：dsh 0.1.7+ 作为独立的设置条目，名字取组合行的 id（上例即 `rtk`）；0.1.5 则是 `dsh-rtk` 命名空间。两种情况下，组合里的 `config:` 提供基础层、设置文档提供用户层覆盖，`/rtk path` 会报告插件实际看到的是哪一层。设置服务代际未知只损失在线编辑能力，插件降级为"仅组合配置"而不是加载失败。
+
+> **行放在哪里决定设置能否写入（dsh 0.1.7+）。** 放在家目录 patch（`~/.dsh/cordis.patch.yml`）里的行是只读的：服务会拒绝"写了也会被下层覆盖"的写入，`/rtk reset` 会如实报告这次拒绝。要保留在线编辑，请把行放进某个 profile 的组合。
+
+> **为什么 `readCompaction` 默认 `none`。** 过滤或截断 `read` 结果，会让模型手里那份副本与磁盘文件不一致，而编辑正是对着副本写的。其余默认开启的技术对正文要么无损、要么只替换整段输出的形态。
+
+### 插件页里的配置界面
+
+装好并重启 Web 宿主后，打开 **插件 → 本包 → 行 `rtk` → 配置**，就是插件自己的配置页：五个日常字段（模式、压缩开关、字符预算、read 压缩、rtk 路径）带"已覆盖/恢复默认"操作与只读提示；保存走宿主设置服务，立即生效。
+
+表单下方是 **收益（Gain）** 面板。数据经宿主带鉴权的 `/api` 前缀下的 **exact Fetch 路由** `POST /api/dsh-rtk/gain` 取得，内部执行 `rtk gain -d -f json`，并且总是跟随本会话**实际生效**的台账（环境里的 `RTK_DB_PATH` > `historyDbPath` > rtk 自己的默认库），所以面板与终端 `rtk gain` 描述的是同一本库。面板把 rtk 的按天数据切成 **今日 / 近 7 天 / 近 30 天 / 全部**，可按**工作区**过滤（`rtk gain -p` 的时间窗下推到 SQL），并画与 rtk CLI 相同的 20 格效率条。工作区下拉优先用宿主自己的项目列表（`workspaceRegistry.list()`），该服务缺失时才退回台账里的 `project_path` 历史。第二个开关在**按天**与**按命令**之间切换：按命令的聚合来自台账的 `commands` 表，因为 `rtk gain` 的 JSON 与 CSV 都不带按命令明细。数字直接摆明：**原始输出**、**rtk 处理后**、**省下（及占比）**，每个表头都带解释性 tooltip。报告缓存 30 秒，**刷新**会绕过缓存。没有 Web connection 的部署会显示明确的"台账不可用"，而不是坏掉的页面。
+
+该页面是浏览器半边（`exports["./client"]` + `dsh.client`），注册键是「包名#行 id」即 `@wingsbutterfly/dsh-rtk#rtk`。没有客户端半边的旧安装不会出现"配置"入口，但配置仍会通过组合的 `config:` 层与设置文档生效。
 
 ## 命令
 
 | 命令 | 说明 |
 |---|---|
-| `/rtk` | 显示配置与运行时状态 |
+| `/rtk` | 显示配置与运行状态 |
 | `/rtk show` | 同 `/rtk` |
-| `/rtk path` | 配置存放位置 |
+| `/rtk path` | 配置来自哪一层 |
 | `/rtk verify` | 检查 rtk 可执行文件是否可用 |
 | `/rtk stats` | 本次会话的压缩收益 |
-| `/rtk clear-stats` | 重置收益计数 |
-| `/rtk reset` | 恢复配置默认值 |
+| `/rtk gain [flags]` | 本插件改写过的命令在 rtk 台账里的收益；flags 原样透传（如 `-H`、`-g`、`-f json`）。读的是本会话实际生效的台账（环境 `RTK_DB_PATH` > `historyDbPath` > rtk 默认库），与终端里直接跑 `rtk gain` 看到的一致 |
+| `/rtk clear-stats` | 清零收益计数 |
+| `/rtk reset` | 恢复配置默认值（失败时如实报告，而不是假装成功） |
 | `/rtk help` | 用法说明 |
 
 ## 工作原理
 
-两部分都挂在工具管线上，而不是包装某个工具，因为 harness 恰好提供两个合适的接缝：
+两半都挂在工具管线上，而不是去包装某个工具，因为 DSH 正好提供了两个合适的接缝：
 
-- **重写走 `tools/execute`。** `tools/pre-execute` 被刻意设计为不能修改参数——参数在派发前就已记入日志并呈现，在那里改写会让记录下来的调用与实际执行的不一致。around-dispatch 阶段是唯一能让「执行的命令」与「记录的命令」不同的地方，而 `dsh-rtk` 把改动限制在单次调用内：派发一返回就恢复原始参数，后续管线阶段与会话日志看到的仍是模型发出的调用。
+- **改写挂在 `tools/execute`。** `tools/pre-execute` 被设计为不可修改参数——参数在派发前就已记录并展示，在那里改写会让"记录下来的调用"与"真正跑的调用"不一致。around-dispatch 阶段是唯一允许执行内容不同的位置，插件把改动严格限制在单次调用内：dispatch 一返回就恢复原始参数，后续流水线与会话日志看到的仍是模型发出的内容。
+- **压缩挂在 `tools/post-execute`**，也就是允许替换结果内容的阶段。
 
-- **压缩走 `tools/post-execute`**，这是允许替换结果内容的阶段。
+两个监听都注册在"该行被挂载到的作用域"里：preset 行只覆盖它自己的 agent（preset 的 standing scope 是每个加入会话的祖先），host 行覆盖进程内所有 agent。
 
-两个监听器都注册在该行被挂载的 scope 里。因此 preset 行恰好覆盖它自己的 agent（preset 的 standing scope 是每个加入它的会话的祖先），而 host 行覆盖进程内所有 agent。
+浏览器半边与这两者独立：配置页与收益面板是 `exports["./client"]` 里的客户端代码，以「包名#行 id」（这里是 `@wingsbutterfly/dsh-rtk#rtk`）注册，只通过两样东西读宿主——设置服务，以及一条精确 Fetch 路由 `POST /api/dsh-rtk/gain`。没有加载客户端半边的部署不会出现「配置」入口，但插件该做的事照常生效。
 
-优化本身只需要 `tools` 服务。`settings` 也写进注入，但只是**时序装置**：它异步注册，声明它就能让 Cordis 把本插件挂起等它就位，live 设置集成不会静默落空（完全没有 settings 服务的组合会让这一行一直等着——官方组合都带它）。不认识的 settings 服务只降级为「仅组合配置」，不会弄坏插件。`commands`、`systemPrompt` 用 `ctx.get` 解析，缺了它们的组合依然获得优化。
+优化本身只需要 `tools` 服务。`settings` 是**升级项而非前置条件**：它异步注册（要先读设置文档），插件先按组合的 `config:` 启动，等服务出现再换成实时集成。没有该服务的组合照样改写与压缩，而不会把整行停掉；未知代际的设置界面降级为"仅组合配置"，不会让插件崩掉。`commands` 与 `systemPrompt` 都通过 `ctx.get` 取，缺任一也不影响优化功能。
 
 ### 注意：改写所用的接缝不是官方扩展点
 
-harness 对 `tools/execute` wrapper 的文档原话是「may change only `exec.signal`」。替换 `arguments` **不是受支持的扩展点**——它能生效，只是因为执行对象要等到结果被通知时才被冻结。而失败的替代方案更糟：`tools/pre-execute` 被刻意设计为不能重写输入（参数在派发前就已记入日志并呈现），同一 layer 内也无法用新工具覆盖已有工具。
+DSH 文档对 `tools/execute` 包装器的措辞是"只允许修改 `exec.signal`"。替换 `arguments` **不是**受支持的扩展点——它能工作，是因为执行对象在结果被通知之前没有被冻结；而失败的替代方案更糟：`tools/pre-execute` 明确不允许改写输入，同一层里也无法用同名工具覆盖注册。
 
-`dsh-rtk` 是**知情地**用了这条接缝，并在力所能及处做了对冲：替换只作用于单次调用、在 `finally` 里恢复，任何失败路径都退回模型发出的原命令。若未来的 harness 提前冻结执行对象，改写会**静默失效**而不是报错——命令按原样执行，压缩不受影响，因为 `tools/post-execute` 是**有文档记载的内容替换阶段**。
+插件是有意识地使用这个接缝的，并在能补偿的地方补偿：替换只作用于单次调用、在 `finally` 里恢复，所有失败路径都退回模型发出的原命令。若未来宿主提前冻结执行对象，改写会**静默失效而不是报错**——命令按原样执行，压缩不受影响，因为 `tools/post-execute` 本身是文档化的内容替换阶段。
 
 ## 与 pi-rtk-optimizer 的差异
 
 | pi-rtk-optimizer | dsh-rtk |
 |---|---|
-| 在 `tool_call` 钩子里改 `event.input.command` | 在一次派发期间替换 `exec.arguments`，随后恢复 |
-| 在 `tool_result` 钩子里压缩 | 在 `tools/post-execute` waterfall 里压缩 |
-| `/rtk` 打开 TUI 设置面板 | `/rtk` 输出文本状态；配置存在 harness 设置文档里 |
-| 配置是它自己管的 JSON 文件 | 配置是 harness 设置命名空间，叠加在组合的 `config:` 块之上 |
-| 通过 `tool_execution_*` 钩子清洗流式输出 | harness 没有对应钩子，故不清洗流式输出 |
-| Windows 专用 shell 修正 | 未移植；目标部署是 POSIX |
+| 在 `tool_call` 钩子里改 `event.input.command` | 仅在单次 dispatch 期间替换 `exec.arguments`，结束后恢复 |
+| 在 `tool_result` 钩子里压缩 | 在 `tools/post-execute` 瀑布里压缩 |
+| `/rtk` 打开 TUI 设置弹窗 | `/rtk` 输出状态文本；配置放在 DSH 设置文档与插件页表单里 |
+| 配置是它自己的 JSON 文件 | 配置是 DSH 设置命名空间，叠在组合的 `config:` 块之上 |
+| 通过 `tool_execution_*` 钩子净化流式输出 | 宿主没有等价钩子，因此不净化流式输出 |
+| 有 Windows 专用 shell 修补 | 未移植；目标部署是 POSIX 与 Windows 的 pwsh 工具 |
 
-其余部分——把重写委托给 `rtk rewrite`、退出码契约、rtk 缺失时的守卫、每个压缩开关的默认值、以及各项技术的算法——都是原样移植。
+其余部分——改写委托给 `rtk rewrite`、退出码契约、rtk 缺失时的守卫、各压缩开关的默认值、每个技术的算法——均按原样移植。
 
 ## 开发
 
 ```bash
-pnpm run typecheck    # 用真实 harness 类型跑 tsc --noEmit
+pnpm install          # 或手工链接 peer 包
+pnpm run typecheck    # 用真实宿主类型跑 tsc --noEmit
 pnpm test             # 先构建，再跑 node --test test/
 pnpm run build        # 产出 lib/
 pnpm run check        # typecheck + test
 ```
 
-测试 import 的是 `lib/`，所以 `pnpm test` 会先构建；否则只改 `src/` 而没构建的回归会静默通过。
+测试导入的是 `lib/`，所以 `pnpm test` 会先构建；否则改了 `src/` 却没构建，测试会静默通过旧产物。浏览器半边由 `scripts/build-client.mjs` 单独产出 `lib/client.js`，`test/client-bundle.test.ts` 会把它与 `src/client/client.js` 逐字节比对——改了源码不重新构建会失败，而不是发一个过期的面板。
 
-`test/integration.test.ts` 用替身上下文驱动真实的 `apply()`，并调用真实的 `rtk` 二进制，所以在没装 rtk 的机器上会失败——这是有意的：重写路径就是这个功能本身。
+验收证据——包括独立评审与实测暴露的缺陷——见 [docs/verification.md](docs/verification.md)。
+
+`test/integration.test.ts` 通过替身上下文驱动真实的 `apply()`，并调用真实的 `rtk` 二进制；没装 rtk 的机器上改写用例会被跳过。这个缺口是有意保留并写明的：改写决策**就是**功能本身，用桩只能证明桩能跑。
 
 ## Star history
 
@@ -255,6 +255,13 @@ pnpm run check        # typecheck + test
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/wings1848/dsh-rtk/output/star-history-dark.svg">
   <img alt="Star history chart" src="https://raw.githubusercontent.com/wings1848/dsh-rtk/output/star-history-light.svg">
 </picture>
+
+## 致谢
+
+- 上游项目：[wings1848/dsh-rtk](https://github.com/wings1848/dsh-rtk)——本仓库的重构基础；
+- 设计来源：[`pi-rtk-optimizer`](https://github.com/MasuRii/pi-rtk-optimizer)（MIT）；
+- 命令改写与节省统计：[rtk](https://github.com/rtk-ai/rtk)（Apache-2.0）；
+- 宿主与插件规范：[DeepSeek Harness](https://github.com/deepseek-ai/dsh)。
 
 ## 许可证
 

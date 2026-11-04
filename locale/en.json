@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "RTK command rewriting and output compaction",
+    "description": "Rewrites supported shell commands to their rtk equivalents and compacts noisy tool output before it reaches the model."
+  }
+}

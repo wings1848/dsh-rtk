@@ -175,3 +175,58 @@ function refuseTrailingSeparator(path: string, raw: string, platform: NodeJS.Pla
   if (separator.test(raw)) return refuseAsDirectory(raw, `${path.replace(/[/\\]$/, '')}/history.db`)
   return { path }
 }
+
+/**
+ * The database rtk itself would use for this process, mirroring its own lookup.
+ *
+ * Only the Gain panel and `/rtk gain` need this: they must read *the* ledger the
+ * rewritten commands write into. When `historyDbPath` names a location the
+ * answer is that path; when it does not (the default) the answer is rtk's own
+ * per-platform choice, which is why this mirrors rtk rather than inventing a
+ * value:
+ *
+ * | platform | rtk's default |
+ * |---|---|
+ * | Linux / other POSIX | `$XDG_DATA_HOME/rtk/history.db`, else `~/.local/share/rtk/history.db` |
+ * | macOS | `~/Library/Application Support/rtk/history.db` |
+ * | Windows | `%LOCALAPPDATA%\rtk\history.db` |
+ *
+ * Verified against rtk 1.1.0 on Linux: a clean `HOME` with no `XDG_DATA_HOME`
+ * gains `.local/share/rtk/history.db`, and setting `XDG_DATA_HOME` moves it to
+ * `$XDG_DATA_HOME/rtk/history.db`.
+ *
+ * An ambient `RTK_DB_PATH` wins over everything, exactly as it does for the
+ * rewritten commands — reading a different database than the one being written
+ * is the bug this whole module exists to stop.
+ *
+ * @param configured - the raw `historyDbPath` setting.
+ * @param environment - environment snapshot; defaults to the process's.
+ * @returns an absolute path to the database rtk writes.
+ */
+export function resolveEffectiveHistoryDbPath(
+  configured: string | undefined,
+  environment: { env?: NodeJS.ProcessEnv; platform?: NodeJS.Platform; home?: string } = {},
+): string {
+  const env = environment.env ?? process.env
+  const platform = environment.platform ?? process.platform
+
+  const ambient = env['RTK_DB_PATH']
+  if (ambient !== undefined && ambient.trim() !== '') return ambient.trim()
+
+  const resolution = resolveHistoryDbPath(configured, { platform })
+  if (resolution.path !== undefined) return resolution.path
+
+  const home = environment.home ?? homedir()
+
+  if (platform === 'win32') {
+    const localAppData = env['LOCALAPPDATA']
+    const base = localAppData !== undefined && localAppData.trim() !== '' ? localAppData : join(home, 'AppData', 'Local')
+    return join(base, 'rtk', 'history.db')
+  }
+
+  if (platform === 'darwin') return join(home, 'Library', 'Application Support', 'rtk', 'history.db')
+
+  const xdg = env['XDG_DATA_HOME']
+  const base = xdg !== undefined && xdg.trim() !== '' ? xdg : join(home, '.local', 'share')
+  return join(base, 'rtk', 'history.db')
+}
