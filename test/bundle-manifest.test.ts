@@ -33,7 +33,13 @@ describe('bundle manifest', () => {
     const patch = readFileSync(join(root, 'cordis.patch.yml'), 'utf8')
     assert.match(patch, /^- insert:/m, 'the patch must insert a row; other patch forms need an existing id and would be skipped')
     assert.match(patch, /^\s+- id: rtk$/m)
-    assert.match(patch, new RegExp(`^\\s+name: '${manifest.name.replace(/[/.]/g, '\\$&')}'$`, 'm'))
+    // Compared as a trimmed line, not a pattern: the package name is data, and
+    // interpolating it into a RegExp would need its own escaping rules.
+    const nameLine = `name: '${manifest.name}'`
+    assert.ok(
+      patch.split('\n').some((line) => line.trim() === nameLine),
+      `the patch must insert the row under the package name: ${nameLine}`,
+    )
   })
 
   it('keeps machine-specific paths out of the shipped patch', () => {

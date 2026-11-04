@@ -1,5 +1,5 @@
 import { statSync } from 'node:fs'
-import { isAbsolute, join } from 'node:path'
+import { isAbsolute } from 'node:path'
 
 import { scrubbedEnv } from './child-env.js'
 import { resolveEffectiveHistoryDbPath } from './history-db.js'
@@ -549,13 +549,9 @@ export function createGainReader(options: GainReaderOptions): GainReader {
   // here would silently re-introduce a hard-coded ledger.
   const databaseOf = options.database
   const runner = options.runner ?? runExecutable
-  const listWorkspaces = options.listWorkspaces ?? readWorkspaces
   const now = options.now ?? (() => Date.now())
   const cacheTtlMs = options.cacheTtlMs ?? 30_000
   const timeoutMs = options.timeoutMs ?? 15_000
-  // Bounded: the key is (range, workspace) and the workspace comes from the
-  // host's own registry or the ledger, but a long-lived panel must not grow a
-  // map without a ceiling.
   // Bounded: the key is (range, workspace) and the workspace comes from the
   // host's own registry or the ledger, but a long-lived panel must not grow a
   // map without a ceiling.
